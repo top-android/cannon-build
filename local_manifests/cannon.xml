@@ -24,10 +24,16 @@
     <!-- ================= 签名密钥（必须 private） ================= -->
     <!-- vendor/lineage/config/common.mk:264 会 -include 这里的 keys.mk，
          自动设置 PRODUCT_DEFAULT_DEV_CERTIFICATE 和 A14 的 CERTIFICATE_OVERRIDES。
-         不要手改 lineage_cannon.mk。 -->
+         不要手改 lineage_cannon.mk。
+
+         ⚠️ 默认注释掉：一旦同步这个仓库，整包就变成 release-keys 签名，
+            与当前手机上跑的 test-keys 不兼容，必须整包 fastboot 刷 + -w，
+            不能增量 OTA。确认要做这次迁移时再取消注释。 -->
+    <!--
     <project path="vendor/lineage-priv/keys"
              name="android_vendor_lineage-priv_keys"
              remote="top" revision="main" />
+    -->
 
     <!-- ================= AOSP/Lineage 移植补丁 ================= -->
     <!-- 这些仓库的改动都是 MTK A12 vendor 适配，不是通用 bugfix -->
@@ -73,6 +79,17 @@
 
     <project path="system/core"
              name="android_system_core"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- ================= 应用层补丁 ================= -->
+    <!-- Jelly: 拦掉 baiduboxapp:// 这类 App 劫持 scheme，百度移动端搜索结果不再跳出浏览器 -->
+    <project path="packages/apps/Jelly"
+             name="android_packages_apps_Jelly"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- Trebuchet: 最近任务底部操作栏常驻"清除全部"按钮 -->
+    <project path="packages/apps/Trebuchet"
+             name="android_packages_apps_Trebuchet"
              remote="top" revision="lineage-21-cannon" />
 
     <!-- ================= 无改动，直接用上游 ================= -->
