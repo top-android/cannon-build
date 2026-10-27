@@ -109,6 +109,10 @@ cmd_build() {
     export GOGC=50
     export OUT_DIR
 
+    # 不设的话 soong 会用 "eng.<用户名>.<时间戳>"（build/soong/ui/build/build.go:73），
+    # ro.build.version.incremental 就变成 eng.root.20261027.103315 这种难看的串
+    export BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d)}"
+
     # shellcheck disable=SC1091
     source build/envsetup.sh >/dev/null
     lunch "$LUNCH_TARGET"
