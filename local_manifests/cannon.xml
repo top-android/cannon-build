@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Xiaomi cannon / cannong (MT6853T) — LineageOS 21
+  所有带本地改动的仓库都指向 top-android；没改过的走 LineageOS 上游。
+  分支统一 lineage-21-cannon，方便以后和上游 merge 时区分"我的"和"他们的"。
+-->
+<manifest>
+    <remote name="top"     fetch="ssh://git@github.com/top-android" />
+    <remote name="lineage" fetch="https://github.com/LineageOS" />
+
+    <!-- ================= 自有仓库 ================= -->
+    <project path="device/xiaomi/cannon"
+             name="android_device_xiaomi_cannon"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="vendor/xiaomi/cannon"
+             name="android_vendor_xiaomi_cannon"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="kernel/xiaomi/cannon"
+             name="android_kernel_xiaomi_cannon"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- ================= 签名密钥（必须 private） ================= -->
+    <!-- vendor/lineage/config/common.mk:264 会 -include 这里的 keys.mk，
+         自动设置 PRODUCT_DEFAULT_DEV_CERTIFICATE 和 A14 的 CERTIFICATE_OVERRIDES。
+         不要手改 lineage_cannon.mk。 -->
+    <project path="vendor/lineage-priv/keys"
+             name="android_vendor_lineage-priv_keys"
+             remote="top" revision="main" />
+
+    <!-- ================= AOSP/Lineage 移植补丁 ================= -->
+    <!-- 这些仓库的改动都是 MTK A12 vendor 适配，不是通用 bugfix -->
+    <project path="build/make"
+             name="android_build_make"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="frameworks/base"
+             name="android_frameworks_base"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="frameworks/native"
+             name="android_frameworks_native"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="frameworks/opt/telephony"
+             name="android_frameworks_opt_telephony"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="hardware/mediatek"
+             name="android_hardware_mediatek"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="hardware/mediatek/wlan"
+             name="android_hardware_mediatek_wlan"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="packages/modules/Bluetooth"
+             name="android_packages_modules_Bluetooth"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="packages/modules/Connectivity"
+             name="android_packages_modules_Connectivity"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="packages/providers/MediaProvider"
+             name="android_packages_providers_MediaProvider"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="system/bpf"
+             name="android_system_bpf"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="system/core"
+             name="android_system_core"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- ================= 无改动，直接用上游 ================= -->
+    <project path="device/mediatek/sepolicy_vndr"
+             name="android_device_mediatek_sepolicy_vndr"
+             remote="lineage" revision="lineage-21" />
+
+    <project path="hardware/xiaomi"
+             name="android_hardware_xiaomi"
+             remote="lineage" revision="lineage-21" />
+</manifest>
