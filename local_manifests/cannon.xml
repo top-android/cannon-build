@@ -26,14 +26,12 @@
          自动设置 PRODUCT_DEFAULT_DEV_CERTIFICATE 和 A14 的 CERTIFICATE_OVERRIDES。
          不要手改 lineage_cannon.mk。
 
-         ⚠️ 默认注释掉：一旦同步这个仓库，整包就变成 release-keys 签名，
-            与当前手机上跑的 test-keys 不兼容，必须整包 fastboot 刷 + -w，
-            不能增量 OTA。确认要做这次迁移时再取消注释。 -->
-    <!--
+         ⚠️ 2026-10-27 起整包已切到这套自签 key（ro.build.tags=dev-keys）。
+            AVB 三处 key 也指向 vendor/lineage-priv/keys/avb_release.pem。
+            换签名是不兼容变更：刷机必须整包 fastboot 刷 + -w，不能增量 OTA。 -->
     <project path="vendor/lineage-priv/keys"
              name="android_vendor_lineage-priv_keys"
              remote="top" revision="main" />
-    -->
 
     <!-- ================= AOSP/Lineage 移植补丁 ================= -->
     <!-- 这些仓库的改动都是 MTK A12 vendor 适配，不是通用 bugfix -->
