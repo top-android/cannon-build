@@ -17,9 +17,11 @@
              name="android_vendor_xiaomi_cannon"
              remote="top" revision="lineage-21-cannon" />
 
+    <!-- next-susfs-new 分支：内核换成 KernelSU-Next v3.4.2 + SUSFS v2.3.0
+         （sus_path / sus_kstat / sus_mount 三件套，版本串 4.14.336 #1） -->
     <project path="kernel/xiaomi/cannon"
              name="android_kernel_xiaomi_cannon"
-             remote="top" revision="lineage-21-cannon" />
+             remote="top" revision="next-susfs-new" />
 
     <!-- ================= 签名密钥（必须 private） ================= -->
     <!-- vendor/lineage/config/common.mk:264 会 -include 这里的 keys.mk，
