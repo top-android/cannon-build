@@ -17,11 +17,17 @@
              name="android_vendor_xiaomi_cannon"
              remote="top" revision="lineage-21-cannon" />
 
-    <!-- next-susfs-new 分支：内核换成 KernelSU-Next v3.4.2 + SUSFS v2.3.0
-         （sus_path / sus_kstat / sus_mount 三件套，版本串 4.14.336 #1） -->
+    <!-- 默认无 KernelSU（lineage-21-cannon）——和 release 里那个 zip 的内核一致。
+         想要 KSU / SUSFS 的用户另刷 boot 变体，不改这里的默认值：
+           lineage-21-cannon  无 KSU（本 ROM 使用）
+           next               KernelSU-Next v1.1.1
+           ksu                KernelSU v0.9.5
+           next-susfs         KernelSU-Next + SUSFS
+           next-susfs-new     KernelSU-Next v3.4.2 + SUSFS v2.3.0（7 项功能）
+         四个分支的内核内容一致（都带 bpf_attr 与 DEVMAP_HASH 回填），只差 KSU/SUSFS。 -->
     <project path="kernel/xiaomi/cannon"
              name="android_kernel_xiaomi_cannon"
-             remote="top" revision="next-susfs-new" />
+             remote="top" revision="lineage-21-cannon" />
 
     <!-- ================= 签名密钥（必须 private） ================= -->
     <!-- vendor/lineage/config/common.mk:264 会 -include 这里的 keys.mk，

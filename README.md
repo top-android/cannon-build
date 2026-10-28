@@ -50,7 +50,7 @@ cd cannon-build
 |---|---|---|
 | `device/xiaomi/cannon` | xiaomi-mt6853-devs | 设备树，主战场 |
 | `vendor/xiaomi/cannon` | xiaomi-mt6853-devs | blob 修正 |
-| `kernel/xiaomi/cannon` | gtcock（SuSFS） | defconfig / emimpu / c2k_usb |
+| `kernel/xiaomi/cannon` | top-android | defconfig / emimpu / c2k_usb / bpf 回填；默认取 `lineage-21-cannon`（无 KSU），KSU/SUSFS 见 boot 变体 |
 | `build/make` | LineageOS | core/Makefile、target/board |
 | `frameworks/base` | LineageOS | SystemUI 媒体输出、StorageManager、隐藏 API |
 | `frameworks/native` | LineageOS | binder 兼容 MTK A12 vendor |
