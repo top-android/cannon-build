@@ -73,6 +73,12 @@
              name="android_packages_modules_NetworkStack"
              remote="top" revision="lineage-21-cannon" />
 
+    <!-- wifi 特性集缓存：MTK vendor HAL 的 wifi_get_supported_feature_set 缺 NULL 检查，
+         芯片上存在 ap0 时会把 HAL 打死（开热点后 WiFi 和热点一起断） -->
+    <project path="packages/modules/Wifi"
+             name="android_packages_modules_Wifi"
+             remote="top" revision="lineage-21-cannon" />
+
     <project path="packages/modules/Bluetooth"
              name="android_packages_modules_Bluetooth"
              remote="top" revision="lineage-21-cannon" />
