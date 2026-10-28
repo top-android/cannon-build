@@ -150,3 +150,26 @@ boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / v
 4. **`m vbmetaimage` 会连坐重编** → 它依赖 system/vendor 的 hashtree 根哈希。日常只 `m bootimage` 或整包 `bacon`。
 5. **`fastboot -w` 之后 recovery 下 adb 是 `unauthorized`** → recovery 只认 `/adb_keys`，靠 `copy_userdata_files()` 从 `/data/misc/adb/adb_keys` 复制；`/data` 刚清空就没有。先在系统里点一次"允许 USB 调试"。
 6. **动过原厂之后不能单刷 system/vendor** → 原厂把 super 元数据整个换了（缺 `system_ext`），必须走完整 OTA sideload 重建 super。
+
+## TODO
+
+- [ ] **热点网段可配置**（要做成正经设置项）
+  现状：网段由 `packages/modules/Connectivity/Tethering` 的 `PrivateAddressCoordinator` 决定，
+  从 `192.168.0.0/16` / `172.16.0.0/12` / `10.0.0.0/8` 里随机挑一个 /24，
+  `SoftApConfiguration` 没有 IP 字段，也没有任何公开 API 或 shell 入口能改。
+  做法：
+  1. `Connectivity` 侧在 `requestDownstreamAddress()` 开头读 `Settings.Global` 的自定义前缀，
+     命中就返回固定 `LinkAddress`。必须仍然过 `isConflictWithUpstream()`（用户填的网段可能和上游
+     同段，会直接断网），改设置后要清 `mCachedAddresses` 才即时生效。
+  2. `packages/apps/Settings` 侧在 `res/xml/wifi_tether_settings.xml` 加一条
+     `<Preference android:fragment="...">`，配 `WifiTetherBasePreferenceController` 子类 +
+     `SettingsFragment`，照抄同目录 `WifiHotspotSpeedSettings` 的结构，
+     并在 `WifiTetherSettings.createPreferenceControllers()` 注册。
+- [ ] **MTK vendor wifi HAL SIGSEGV 的真修**
+  `IWifiChip.getFeatureSet()` 在 ap0 存在时会打死 HAL（`wifi_get_supported_feature_set` 里
+  `getHalInfo()` 返回 NULL 后解引用 `+0x10`）。目前只在 framework 侧用 static 缓存绕开，
+  HAL 侧 `hardware/interfaces/wifi/aidl/default/wifi_chip.cpp` 的
+  `getFirstActiveWlanIfaceName()` 仍然会返回 AP 接口名，没改。
+- [ ] **A15（LineageOS 22）适配**
+  VNDK 在 A15 已废弃；`PRODUCT_ENFORCE_VINTF_MANIFEST_OVERRIDE := false` 那条 treble 绕过
+  要按 22.2 的 `config.mk` 重新评估。
