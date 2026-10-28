@@ -67,6 +67,9 @@ cd cannon-build
 
 `device/mediatek/sepolicy_vndr`、`hardware/xiaomi` 无改动，直接走上游。
 
+> 移植过程中踩的坑、每个补丁的来龙去脉记在另一个**私有仓库**的 `docs/` 里
+> （未公开，不提供链接）。
+
 ## 签名
 
 `vendor/lineage/config/common.mk:264` 会 `-include vendor/lineage-priv/keys/keys.mk`，
