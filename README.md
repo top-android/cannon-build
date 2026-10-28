@@ -80,6 +80,62 @@ cd cannon-build
 > 首次必须整包 fastboot 刷 + `-w`，不能走增量 OTA。
 > 切完以后这台机器只能用这一套证书，换证书等于再迁移一次。
 
+## 刷机
+
+### 日常升级（已经在同一签名版本上）
+
+不清数据，两种都行：
+
+**A. 系统更新** —— 设置 → 系统 → 系统更新 → 检查 → 下载 → 安装
+
+**B. sideload**
+
+```powershell
+adb reboot sideload
+adb sideload lineage-21.0-XXXXXXXX-UNOFFICIAL-cannon.zip
+```
+
+### 首次刷机（从 MIUI 或别的 ROM 过来）
+
+只刷 recovery，其余由 OTA 包自己写：
+
+```powershell
+fastboot flash recovery recovery.img
+fastboot reboot recovery
+```
+
+recovery 里：
+
+1. **Factory reset → Format data**（从 MIUI 过来必须清）
+2. **Apply update → Apply from ADB**
+3. `adb sideload lineage-21.0-XXXXXXXX-UNOFFICIAL-cannon.zip`
+
+包里带 boot / dtbo / vbmeta / system / vendor / product / system_ext，不用单独刷。
+
+### 从 testkey 老版本迁移（仅一次）
+
+20261027 及更早是 AOSP testkey 签的，和现在的自签 key 不兼容，sideload 会验签失败。必须全量 fastboot + `-w`：
+
+```powershell
+fastboot flash boot boot.img
+fastboot flash recovery recovery.img
+fastboot flash dtbo dtbo.img
+fastboot flash vbmeta vbmeta.img
+fastboot flash vbmeta_system vbmeta_system.img
+fastboot flash vbmeta_vendor vbmeta_vendor.img
+fastboot -w
+fastboot reboot fastboot
+fastboot flash system system.img
+fastboot flash vendor vendor.img
+fastboot flash product product.img
+fastboot flash system_ext system_ext.img
+fastboot reboot
+```
+
+boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / vendor / product / system_ext 在 super 里是逻辑分区（必须 fastbootd）。走完这一次，以后都走上面的 sideload。
+
+---
+
 ## 已知坑
 
 1. **漏 `OUT_DIR`** → soong 用 `$ROM_DIR/out`，从零编 177774 步。日志里看到 `/cannon/rom/out/...` 就是踩了。
