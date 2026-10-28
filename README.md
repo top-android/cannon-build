@@ -153,23 +153,57 @@ boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / v
 
 ## TODO
 
+- [x] **wifi HAL 被热点打死**（已修，framework 侧规避）
+  MTK 的 `libwifi-hal.so` 多处不判空，`getHalInfo()` 拿到空句柄后直接解引用。
+  已知两条触发路径，都已在 `packages/modules/Wifi` 里绕开：
+  1. `IWifiChip.getFeatureSet()`：ap0 存在时 `getFirstActiveWlanIfaceName()` 返回 AP 接口，
+     `wifi_get_supported_feature_set()` 解引用空句柄（fault addr 0x10）。
+     修法：`WifiChipAidlImpl.getCapabilitiesInternal()` 用**进程级 static** 缓存，
+     开机第一次 `getAllChipInfo()`（此时还没有任何接口）就把特性集存下来，之后不再问 HAL。
+     必须是 static —— `HalDeviceManager.getAllChipInfo()` 每次都 `mWifiHal.getChip()`
+     新建一个 `WifiChipAidlImpl`，实例字段的缓存活不过一次调用。
+  2. `IWifiChip.getDebugHostWakeReasonStats()`：`dumpsys wifi` 会走这条，
+     `wifi_get_driver_memory_dump()` 解引用空句柄（fault addr 0x0）。
+     修法：`WifiVendorHal.getWlanWakeReasonCount()` 直接返回 null，不向 HAL 取
+     （代价是 `dumpsys wifi` 里 `Wlan Wake Reasons` 那行变成 null）。
+  **HAL 侧真修做不了**：vendor blob 闭源；树里的 `hardware/mediatek/wlan/wifi_hal`
+  是阉割版（无 NAN，缺 `wifi_get_link_stats` / `wifi_set_link_stats` /
+  `wifi_clear_link_stats` / `wifi_get_iface_handle` /
+  `wifi_multi_sta_set_*` / `wifi_set_subsystem_restart_handler` 共 7 个 C API），
+  换上去会丢功能，甚至直接起不来。
+
 - [ ] **热点网段可配置**（要做成正经设置项）
   现状：网段由 `packages/modules/Connectivity/Tethering` 的 `PrivateAddressCoordinator` 决定，
   从 `192.168.0.0/16` / `172.16.0.0/12` / `10.0.0.0/8` 里随机挑一个 /24，
-  `SoftApConfiguration` 没有 IP 字段，也没有任何公开 API 或 shell 入口能改。
+  `SoftApConfiguration` 没有 IP 字段，也没有任何公开 API 或 shell 入口能改
+  （`cmd wifi force-softap-band/channel` 需要 root）。
   做法：
   1. `Connectivity` 侧在 `requestDownstreamAddress()` 开头读 `Settings.Global` 的自定义前缀，
-     命中就返回固定 `LinkAddress`。必须仍然过 `isConflictWithUpstream()`（用户填的网段可能和上游
-     同段，会直接断网），改设置后要清 `mCachedAddresses` 才即时生效。
+     命中就返回固定 `LinkAddress`。必须仍然过 `isConflictWithUpstream()`（用户填的网段可能和
+     上游同段，会直接断网），改设置后要清 `mCachedAddresses` 才即时生效。
   2. `packages/apps/Settings` 侧在 `res/xml/wifi_tether_settings.xml` 加一条
      `<Preference android:fragment="...">`，配 `WifiTetherBasePreferenceController` 子类 +
      `SettingsFragment`，照抄同目录 `WifiHotspotSpeedSettings` 的结构，
      并在 `WifiTetherSettings.createPreferenceControllers()` 注册。
-- [ ] **MTK vendor wifi HAL SIGSEGV 的真修**
-  `IWifiChip.getFeatureSet()` 在 ap0 存在时会打死 HAL（`wifi_get_supported_feature_set` 里
-  `getHalInfo()` 返回 NULL 后解引用 `+0x10`）。目前只在 framework 侧用 static 缓存绕开，
-  HAL 侧 `hardware/interfaces/wifi/aidl/default/wifi_chip.cpp` 的
-  `getFirstActiveWlanIfaceName()` 仍然会返回 AP 接口名，没改。
+
+- [ ] **热点开启时 WiFi 扫描慢 4 倍**
+  实测（同一台机器、同一个 r6、同一内核，热点先开再开 WiFi）：
+
+  | 场景 | TRIGGER_SCAN → NEW_SCAN_RESULTS |
+  |---|---|
+  | 热点关 | 0.82 s |
+  | 热点开（AP 2.4G ch6） | 4.00 s |
+  | 热点开（AP 5G） | 3.63 s |
+
+  与频段无关。framework 侧不是瓶颈（建 STA 接口 14ms、扫描结果到发起连接 38ms），
+  时间全花在驱动扫描上。驱动没有暴露扫描/并发相关的 module_param
+  （`gl_init.c` 只有 sta/p2p/ap 三个接口名参数，而且驱动编进内核，
+  `/sys/module/wlan` 不存在），DBDC 已经是开的（`include/config.h:1234`），
+  扫描时隙调度在闭源固件里。
+  唯一低风险缓解：AP 活跃时裁剪扫描信道（2.4G 全扫 + 5G 仅 UNII-1 的 36/40/44/48），
+  约能压到 2 秒，代价是热点开着时部分 5G 网络搜不到。**暂不处理。**
+  注：Settings 的列表通常要两轮扫描才画全，所以用户感知约 8 秒。
+
 - [ ] **A15（LineageOS 22）适配**
   VNDK 在 A15 已废弃；`PRODUCT_ENFORCE_VINTF_MANIFEST_OVERRIDE := false` 那条 treble 绕过
   要按 22.2 的 `config.mk` 重新评估。
