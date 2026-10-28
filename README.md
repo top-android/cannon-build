@@ -58,14 +58,16 @@ cd cannon-build
 | `hardware/mediatek` | LineageOS | power AIDL |
 | `hardware/mediatek/wlan` | xiaomi-mt6853-devs | wifi_hal 构建 |
 | `packages/modules/Bluetooth` | LineageOS | A2DP / HCI |
-| `packages/modules/Connectivity` | LineageOS | NetBpfLoad 容错（bpf_attr 补丁已随内核 backport 回退） |
 | `packages/modules/NetworkStack` | LineageOS | captive portal 探测地址本地化 |
 | `packages/providers/MediaProvider` | LineageOS | TranscodeHelper |
-| `system/bpf` | LineageOS | BpfLoader 容错 |
 | `system/core` | LineageOS | RefBase |
 | `vendor/lineage-priv/keys` | 私有仓库 | 签名密钥，**必须 private** |
 
 `device/mediatek/sepolicy_vndr`、`hardware/xiaomi` 无改动，直接走上游。
+
+`packages/modules/Connectivity`、`system/bpf` 曾经也是 fork（放 bpfloader 的容错补丁），
+内核补齐 `bpf_attr` 与 `BPF_MAP_TYPE_DEVMAP_HASH` 之后 4.14 上已无 critical 对象加载失败，
+那两个 fork 的改动成了死代码，已回退成上游并从 manifest 移除。
 
 > 移植过程中踩的坑、每个补丁的来龙去脉记在另一个**私有仓库**的 `docs/` 里
 > （未公开，不提供链接）。

@@ -71,24 +71,8 @@
              name="android_packages_modules_Bluetooth"
              remote="top" revision="lineage-21-cannon" />
 
-    <!-- ★ 不能删：4.14 内核上 netbpfload 会因为 critical 对象（offload@btf / bpfRingbufProg）
-         加载失败而 return 2，整条链断掉 → 卡开机动画。本 fork 保留两处改动：
-           1) netbpfload/NetBpfLoad.cpp     sleep(20); return 2;  → 记日志后降级继续
-           2) netbpfload/netbpfload.rc(+.mainline.rc) 注释 reboot_on_failure（否则秒重启）
-         bpf_attr 的用户态绕法（loader.cpp）已随内核 backport 回退，不在本 fork 里了。 -->
-    <project path="packages/modules/Connectivity"
-             name="android_packages_modules_Connectivity"
-             remote="top" revision="lineage-21-cannon" />
-
     <project path="packages/providers/MediaProvider"
              name="android_packages_providers_MediaProvider"
-             remote="top" revision="lineage-21-cannon" />
-
-    <!-- ★ 不能删：平台加载器 /system/bin/bpfloader 同样有 critical 对象失败即中止的逻辑
-         （bpfRingbufProg.o 需要 5.8 的 ringbuf，4.14 没有）。本 fork 只保留
-         bpfloader/BpfLoader.cpp 的「降级继续」改动；libbpf_android/Loader.cpp 已还原上游。 -->
-    <project path="system/bpf"
-             name="android_system_bpf"
              remote="top" revision="lineage-21-cannon" />
 
     <project path="system/core"
@@ -107,6 +91,11 @@
              remote="top" revision="lineage-21-cannon" />
 
     <!-- ================= 无改动，直接用上游 ================= -->
+    <!-- packages/modules/Connectivity 与 system/bpf 曾经是 fork：里面放着
+         bpfloader/netbpfload 的「critical 对象失败降级继续」和注释掉的 reboot_on_failure。
+         内核补齐 bpf_attr(4.15/4.17) + BPF_MAP_TYPE_DEVMAP_HASH(5.4) 之后，
+         4.14 上已经没有任何 critical 对象加载失败，这两个 fork 的改动全是死代码，
+         已回退成上游并从本文件移除（fork 仓库保留但不再使用）。 -->
     <project path="device/mediatek/sepolicy_vndr"
              name="android_device_mediatek_sepolicy_vndr"
              remote="lineage" revision="lineage-21" />
