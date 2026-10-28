@@ -61,6 +61,12 @@
              name="android_hardware_mediatek_wlan"
              remote="top" revision="lineage-21-cannon" />
 
+    <!-- captive portal 探测地址本地化（connect.rom.miui.com / hicloud），
+         否则国内网络下 NetworkStack 会误判「无网络」 -->
+    <project path="packages/modules/NetworkStack"
+             name="android_packages_modules_NetworkStack"
+             remote="top" revision="lineage-21-cannon" />
+
     <project path="packages/modules/Bluetooth"
              name="android_packages_modules_Bluetooth"
              remote="top" revision="lineage-21-cannon" />

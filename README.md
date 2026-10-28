@@ -58,7 +58,8 @@ cd cannon-build
 | `hardware/mediatek` | LineageOS | power AIDL |
 | `hardware/mediatek/wlan` | xiaomi-mt6853-devs | wifi_hal 构建 |
 | `packages/modules/Bluetooth` | LineageOS | A2DP / HCI |
-| `packages/modules/Connectivity` | LineageOS | NetBpfLoad 容错 |
+| `packages/modules/Connectivity` | LineageOS | NetBpfLoad 容错（bpf_attr 补丁已随内核 backport 回退） |
+| `packages/modules/NetworkStack` | LineageOS | captive portal 探测地址本地化 |
 | `packages/providers/MediaProvider` | LineageOS | TranscodeHelper |
 | `system/bpf` | LineageOS | BpfLoader 容错 |
 | `system/core` | LineageOS | RefBase |
