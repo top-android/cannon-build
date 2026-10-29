@@ -150,6 +150,10 @@ boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / v
 4. **`m vbmetaimage` 会连坐重编** → 它依赖 system/vendor 的 hashtree 根哈希。日常只 `m bootimage` 或整包 `bacon`。
 5. **`fastboot -w` 之后 recovery 下 adb 是 `unauthorized`** → recovery 只认 `/adb_keys`，靠 `copy_userdata_files()` 从 `/data/misc/adb/adb_keys` 复制；`/data` 刚清空就没有。先在系统里点一次"允许 USB 调试"。
 6. **动过原厂之后不能单刷 system/vendor** → 原厂把 super 元数据整个换了（缺 `system_ext`），必须走完整 OTA sideload 重建 super。
+7. **内核 `#N` 不是 `#1`** → 走 `m bootimage` 时 `export KBUILD_BUILD_VERSION=1` **传不进内核 make**（soong → `kernel.mk` 那一层丢了），必须写 `out/target/product/cannon/obj/KERNEL_OBJ/.version`，而且初值要写 **0**（内核构建会自增 1 后输出）。
+8. **`ro.build.date` 是旧日期** → 它取自 `out/build_date.txt`，且在 `sysprop.mk` 里是 order-only 依赖；**只删 `$OUT/system/build.prop` 没用**，真正缓存的是 `$OUT/obj/PACKAGING/system_build_prop_intermediates/buildinfo.prop`。
+
+> 7、8 两条的完整根因和实测见 [cannon-lineageos-21-build](https://github.com/GTian5418/cannon-lineageos-21-build) 的 `docs/2026-10-28-内核四分支编译与版本号.md` 与 `docs/2026-10-29-ro.build.date沿用旧日期.md`。只换内核请改用 `Cannon_Docker_Kernel_Build` 出 AnyKernel3，别在源码树里连编 boot。
 
 ## TODO
 
