@@ -1,9 +1,12 @@
-# top-android / cannon — LineageOS 21 构建
+# top-android / cannon — LineageOS 21 / 22.2 构建
 
-Xiaomi Redmi Note 9T 5G（`cannon` / `cannong`，MT6853T）在 A12 厂商底座上的
-LineageOS 21（Android 14）构建入口。
+Xiaomi Redmi Note 9T 5G（`cannon` / `cannong`，MT6853T）在 A12 厂商底座上的构建入口。
+支持两套目标：
 
-目标：**clone 这一个仓库 → `./build.sh all` → 出包**，不再依赖任何本机手工 sed。
+- **A14 / LineageOS 21**（默认，`lineage_cannon-ap2a-userdebug`）
+- **A15 / LineageOS 22.2**（`lineage_cannon-bp1a-user`，已适配完成并发布）
+
+目标：**clone 这一个仓库 → 一条 `./build.sh` 命令 → 出包**，不再依赖任何本机手工 sed。
 
 ## 用法
 
@@ -12,13 +15,29 @@ git clone git@github.com:top-android/cannon-build.git
 cd cannon-build
 
 ./build.sh doctor    # 先体检
+
+# A14（默认）：LineageOS 21
 ./build.sh all       # init + sync + build（首次约 60-80G，几小时）
+
+# A15：LineageOS 22.2（已适配，产出 user 变体）
+./build.sh a15       # init(lineage-22.2) + sync + apply A15 补丁(幂等) + build
 ```
+
+`a15` 与 `all` 的差别只是切几个变量，**`all`（A14）默认行为完全不变**：
+
+| 项 | `all`（A14 默认） | `a15` |
+|---|---|---|
+| `MANIFEST_BRANCH` | `lineage-21.0` | `lineage-22.2` |
+| `LOCAL_MANIFEST_NAME` | `cannon.xml` | `cannon-22.2.xml` |
+| `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | `lineage_cannon-bp1a-user` |
+| 编译前补丁 | 无 | `apply_a15_cannon_patches.sh`（幂等，已提交进 fork 的自动跳过） |
+
+也可用环境变量临时切：`PROFILE=a15 ./build.sh all`。
 
 单独跑：
 
 ```bash
-./build.sh init      # repo init + 安装 local_manifests/cannon.xml
+./build.sh init      # repo init + 安装 local_manifests/<profile 对应>.xml
 ./build.sh sync      # repo sync
 ./build.sh build     # lunch + m bacon
 ```
@@ -33,6 +52,9 @@ cd cannon-build
 | `CCACHE_DIR` | `/cannon/ccache` | ccache 目录 |
 | `JOBS` | `8` | `bacon` 在 `-j16` 会 OOM（exit 137） |
 | `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | |
+
+> 选 `a15`（或 `PROFILE=a15`）会覆盖 `MANIFEST_BRANCH` / `LOCAL_MANIFEST_NAME` / `LUNCH_TARGET`
+> 并启用编译前补丁，见上面 profile 对照表；不选就是 A14 默认。
 
 ## 前置条件
 
@@ -176,19 +198,17 @@ boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / v
   `wifi_multi_sta_set_*` / `wifi_set_subsystem_restart_handler` 共 7 个 C API），
   换上去会丢功能，甚至直接起不来。
 
-- [ ] **热点网段可配置**（要做成正经设置项）
+- [ ] **热点网段可配置**（后端已做，设置 UI 待做）
   现状：网段由 `packages/modules/Connectivity/Tethering` 的 `PrivateAddressCoordinator` 决定，
   从 `192.168.0.0/16` / `172.16.0.0/12` / `10.0.0.0/8` 里随机挑一个 /24，
-  `SoftApConfiguration` 没有 IP 字段，也没有任何公开 API 或 shell 入口能改
-  （`cmd wifi force-softap-band/channel` 需要 root）。
-  做法：
-  1. `Connectivity` 侧在 `requestDownstreamAddress()` 开头读 `Settings.Global` 的自定义前缀，
-     命中就返回固定 `LinkAddress`。必须仍然过 `isConflictWithUpstream()`（用户填的网段可能和
-     上游同段，会直接断网），改设置后要清 `mCachedAddresses` 才即时生效。
-  2. `packages/apps/Settings` 侧在 `res/xml/wifi_tether_settings.xml` 加一条
-     `<Preference android:fragment="...">`，配 `WifiTetherBasePreferenceController` 子类 +
-     `SettingsFragment`，照抄同目录 `WifiHotspotSpeedSettings` 的结构，
-     并在 `WifiTetherSettings.createPreferenceControllers()` 注册。
+  `SoftApConfiguration` 没有 IP 字段。
+  - [x] **后端**：`requestStickyDownstreamAddress()` 对 `TETHERING_WIFI` 优先读系统属性
+    `persist.sys.cannon.hotspot.subnet`（形如 `192.168.7.0/24`），过 `getConflictWithUpstream()`
+    后返回固定网关（`.1`）；未设/非法/与上游冲突则回退随机。
+    用法：`adb shell setprop persist.sys.cannon.hotspot.subnet 192.168.7.0/24`，**关再开热点生效**
+    （地址运行时缓存）；留空 `setprop ... ""` 恢复随机。
+  - [ ] **设置 UI**：`packages/apps/Settings` 的 `res/xml/wifi_tether_settings.xml` 加输入项 +
+    `WifiTetherBasePreferenceController` 子类，写 `Settings.Global`，后端再改读 `Settings.Global`。
 
 - [ ] **热点开启时 WiFi 扫描慢 4 倍**
   实测（同一台机器、同一个 r6、同一内核，热点先开再开 WiFi）：
@@ -208,6 +228,7 @@ boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / v
   约能压到 2 秒，代价是热点开着时部分 5G 网络搜不到。**暂不处理。**
   注：Settings 的列表通常要两轮扫描才画全，所以用户感知约 8 秒。
 
-- [ ] **A15（LineageOS 22）适配**
-  VNDK 在 A15 已废弃；`PRODUCT_ENFORCE_VINTF_MANIFEST_OVERRIDE := false` 那条 treble 绕过
-  要按 22.2 的 `config.mk` 重新评估。
+- [x] **A15（LineageOS 22.2）适配**（已完成，用 `./build.sh a15`）
+  `lineage_cannon-bp1a-user` 源码树已全量编出并发布。沿途漂移均已处理：
+  VNDK 废弃、`TARGET_LD_SHIM_LIBS` 失效（改 patchelf 注入 NEEDED）、
+  `ro.build.display.id` 落点从 `sysprop.mk` 迁到 `build/soong/scripts/gen_build_prop.py`。
