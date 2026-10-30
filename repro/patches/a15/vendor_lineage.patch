@@ -1,0 +1,18 @@
+diff --git a/config/BoardConfigKernel.mk b/config/BoardConfigKernel.mk
+index 3a177b4..7e6010c 100644
+--- a/config/BoardConfigKernel.mk
++++ b/config/BoardConfigKernel.mk
+@@ -129,7 +129,12 @@ ifneq ($(KERNEL_NO_GCC), true)
+     KERNEL_TOOLCHAIN_PREFIX_arm64 := aarch64-linux-android-
+     # arm toolchain
+     KERNEL_TOOLCHAIN_arm := $(GCC_PREBUILTS)/arm/arm-linux-androideabi-4.9/bin
+-    KERNEL_TOOLCHAIN_PREFIX_arm := arm-linux-androidkernel-
++    # cannon(A15): 原默认 `arm-linux-androidkernel-` 会被 arch/arm64/Makefile 变成
++    # `--target=arm-linux-androidkernel`，而 clang-r536225 已不支持该 triple（把 androidkernel
++    # 拆成 android + 版本 kernel → "version 'kernel' ... is invalid"，编 vDSO32 时报错）。
++    # 改成 prebuilt 实际存在、且 clang 认的 `arm-linux-androideabi-`：--target/--prefix/PATH
++    # 三处对齐（bin 目录里就是 arm-linux-androideabi-{as,ld,gcc,...}）。
++    KERNEL_TOOLCHAIN_PREFIX_arm := arm-linux-androideabi-
+     # x86 toolchain
+     KERNEL_TOOLCHAIN_x86 := $(GCC_PREBUILTS)/x86/x86_64-linux-android-4.9/bin
+     KERNEL_TOOLCHAIN_PREFIX_x86 := x86_64-linux-android-

@@ -1,0 +1,22 @@
+diff --git a/res/values/config.xml b/res/values/config.xml
+index 8d6b64e..f8ef056 100644
+--- a/res/values/config.xml
++++ b/res/values/config.xml
+@@ -38,12 +38,15 @@
+          Empty by default but may be overridden by RROs. -->
+     <integer name="config_captive_portal_dns_probe_timeout"></integer>
+     <!--suppress CheckTagEmptyBody: overlayable resource to use as configuration hook -->
+-    <string name="config_captive_portal_http_url" translatable="false"></string>
++    <string name="config_captive_portal_http_url" translatable="false">http://connect.rom.miui.com/generate_204</string>
+     <!--suppress CheckTagEmptyBody: overlayable resource to use as configuration hook -->
+-    <string name="config_captive_portal_https_url" translatable="false"></string>
++    <string name="config_captive_portal_https_url" translatable="false">https://connectivitycheck.gstatic.cn/generate_204</string>
+     <!-- Literal commas are not allowed in the url configuration because they
+          are used as a separator internally. -->
+     <string-array name="config_captive_portal_fallback_urls" translatable="false">
++        <item>http://connectivitycheck.gstatic.cn/generate_204</item>
++        <item>http://www.googleapis.cn/generate_204</item>
++        <item>http://connect.rom.miui.com/generate_204</item>
+     </string-array>
+     <string-array name="config_captive_portal_fallback_probe_specs" translatable="false">
+     </string-array>

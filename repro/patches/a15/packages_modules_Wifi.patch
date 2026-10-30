@@ -1,0 +1,86 @@
+diff --git a/service/java/com/android/server/wifi/HalDeviceManager.java b/service/java/com/android/server/wifi/HalDeviceManager.java
+index a251af8..2a06452 100644
+--- a/service/java/com/android/server/wifi/HalDeviceManager.java
++++ b/service/java/com/android/server/wifi/HalDeviceManager.java
+@@ -2936,16 +2936,19 @@ public class HalDeviceManager {
+     private BitSet getChipCapabilities(@NonNull WifiChip wifiChip) {
+         if (wifiChip == null) return new BitSet();
+ 
+-        WifiChip.Response<BitSet> capsResp = wifiChip.getCapabilitiesBeforeIfacesExist();
+-        if (capsResp.getStatusCode() == WifiHal.WIFI_STATUS_SUCCESS) {
+-            return capsResp.getValue();
+-        } else if (capsResp.getStatusCode() != WifiHal.WIFI_STATUS_ERROR_REMOTE_EXCEPTION) {
+-            // Non-remote exception here is likely because HIDL HAL < v1.5
+-            // does not support getting capabilities before creating an interface.
+-            return CHIP_CAPABILITY_UNINITIALIZED;
+-        } else { // remote exception
+-            return new BitSet();
+-        }
++        // cannon A15 老 vendor 适配：本机 wifi 原生栈是 MTK A12 闭源 blob
++        // (android.hardware.wifi-service-lazy + libwifi-hal.so)。其 AIDL 实现里
++        // getCapabilitiesBeforeIfacesExist / getCapabilitiesAfterIfacesExist 都最终走到
++        // WifiChipAidlImpl.getCapabilitiesInternal() → IWifiChip.getFeatureSet() →
++        // 闭源 wifi_legacy_hal.cpp wifi_get_supported_feature_set()；而本机开机即常驻
++        // ap0/p2p0/wlan1 伪接口，其 interface_info->handle 为空，解引用空指针
++        // SIGSEGV(fault 0x10) → wifi HAL 崩溃 → wlan0 消失、WiFi 反复重启
++        // （WifiVendorHal.getSupportedFeatureSet 已在 BUILD(M) 绕开，此处为第二处、也是最后一处
++        // 会到达 IWifiChip.getFeatureSet 的代码路径）。闭源 blob 无法判空，故此处直接跳过能力
++        // 查询，返回 CHIP_CAPABILITY_UNINITIALIZED —— 语义等价"老 HAL 不支持能力查询"：
++        // areChipCapabilitiesSupported() 遇到 UNINITIALIZED 直接 return true（不按能力过滤接口），
++        // 接口创建/热点/STA 行为不受影响。
++        return CHIP_CAPABILITY_UNINITIALIZED;
+     }
+ 
+     /**
+diff --git a/service/java/com/android/server/wifi/WifiVendorHal.java b/service/java/com/android/server/wifi/WifiVendorHal.java
+index 13b659f..d09c6c8 100644
+--- a/service/java/com/android/server/wifi/WifiVendorHal.java
++++ b/service/java/com/android/server/wifi/WifiVendorHal.java
+@@ -868,40 +868,19 @@ public class WifiVendorHal {
+         mCachedWifiChipInfos.put(chip.getId(), wifiChipInfo);
+     }
+ 
+-    /**
+-     * Get the supported features
+-     *
+-     * The result may differ depending on the mode (STA or AP)
+-     *
+-     * @param ifaceName Name of the interface.
+-     * @return BitSet defined by WifiManager.WIFI_FEATURE_*
+-     */
++    // cannon A15 老 vendor 适配：MTK A12 闭源 wifi HAL（android.hardware.wifi-service-lazy + libwifi-hal.so，
++    // BuildId 798edac8…，PRODUCT_COPY_FILES 覆盖的 blob）的 IWifiChip/IWifiStaIface.getFeatureSet() 在本机
++    // 因常驻伪接口(ap0/p2p0/wlan1)拿到空 wifi_handle，进 wifi_get_supported_feature_set 解引用空指针
++    // SIGSEGV(fault 0x10) → HAL 崩溃 → wlan0 消失、WiFi 反复重启（开热点时更明显）。
++    // 该 HAL 为闭源 blob 无法判空，故彻底绕开其 feature 查询：基础能力(INFRA/HOTSPOT/P2P/AWARE)由下方
++    // mHalDeviceManager.getSupportedIfaceTypes() 提供，WPA3/OWE/DPP/MBO/OCE 等由 supplicant 侧
++    // (WifiNative.getSupportedFeatureSetInternal 的 getAdvancedCapabilities/getWpaDriverFeatureSet)另补，功能不受影响。
+     public BitSet getSupportedFeatureSet(@NonNull String ifaceName) {
+         BitSet featureSet = new BitSet();
+         if (!mHalDeviceManager.isStarted() || !mHalDeviceManager.isSupported()) {
+             return getSupportedFeatureSetFromPackageManager();
+         }
+ 
+-        synchronized (sLock) {
+-            if (mWifiChip != null) {
+-                WifiChip.Response<BitSet> capsResp = mWifiChip.getCapabilitiesAfterIfacesExist();
+-                if (capsResp.getStatusCode() == WifiHal.WIFI_STATUS_SUCCESS) {
+-                    featureSet = capsResp.getValue();
+-                } else if (capsResp.getStatusCode() == WifiHal.WIFI_STATUS_ERROR_REMOTE_EXCEPTION) {
+-                    return new BitSet();
+-                }
+-            }
+-
+-            WifiStaIface iface = getStaIface(ifaceName);
+-            if (iface != null) {
+-                featureSet.or(iface.getCapabilities());
+-                if (mHalDeviceManager.is24g5gDbsSupported(iface)
+-                        || mHalDeviceManager.is5g6gDbsSupported(iface)) {
+-                    featureSet.set(WifiManager.WIFI_FEATURE_DUAL_BAND_SIMULTANEOUS);
+-                }
+-            }
+-        }
+-
+         if (mWifiGlobals.isWpa3SaeH2eSupported()) {
+             featureSet.set(WifiManager.WIFI_FEATURE_SAE_H2E);
+         }

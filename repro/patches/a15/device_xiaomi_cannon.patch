@@ -1,0 +1,273 @@
+diff --git a/BoardConfig.mk b/BoardConfig.mk
+index 998b8c7..016963f 100644
+--- a/BoardConfig.mk
++++ b/BoardConfig.mk
+@@ -95,6 +95,20 @@ TARGET_COPY_OUT_PRODUCT := product
+ TARGET_COPY_OUT_SYSTEM_EXT := system_ext
+ TARGET_COPY_OUT_VENDOR := vendor
+ 
++# OTA / Update 机制
++# 2026-10-30: cannon 是 A-only + 动态分区(super) 设备（fstab.mt6853 的 system/vendor/
++#   product/system_ext/boot/recovery 均无 _a/_b slot 后缀，boot/recovery 为独立分区）。
++#   Android 15 / LOS22.2 的 build/make/core/board_config.mk:945-946 会把“空”的
++#   AB_OTA_UPDATER 默认成 true（新构建系统默认按 A/B 处理），导致 `m bacon` 走
++#   GenerateAbOtaPackage 生成 A/B OTA，进而断言
++#   "META/ab_partitions.txt is required for ab_update" 失败（A-only 无该文件，
++#   build4 即卡在此处）。显式设为 false：
++#     → board_config.mk 推得 TARGET_OTA_ALLOW_NON_AB := true；
++#     → ota_from_target_files 分派到 non_ab_ota.GenerateNonAbOtaPackage/
++#       WriteFullOTAPackage（支持 use_dynamic_partitions + build_super_empty_partition）；
++#     → 产出可用 recovery `adb sideload` 的全量 OTA zip。
++AB_OTA_UPDATER := false
++
+ # Platform
+ TARGET_BOARD_PLATFORM := mt6853
+ BOARD_HAS_MTK_HARDWARE := true
+@@ -145,7 +159,10 @@ BOARD_AVB_VBMETA_SYSTEM_ROLLBACK_INDEX_LOCATION := 1
+ BOARD_AVB_RECOVERY_KEY_PATH := vendor/lineage-priv/keys/avb_release.pem
+ BOARD_AVB_RECOVERY_ALGORITHM := SHA256_RSA2048
+ BOARD_AVB_RECOVERY_ROLLBACK_INDEX := 1
+-BOARD_AVB_RECOVERY_ROLLBACK_INDEX_LOCATION := 1
++# 2026-10-30: 原为 1，与 BOARD_AVB_VBMETA_SYSTEM_ROLLBACK_INDEX_LOCATION(=1) 冲突，
++# avbtool 报 "Rollback Index Location 1 is already in use" → vbmeta.img 生成失败。
++# 改为唯一值 3（vbmeta_system=1, vbmeta_vendor=2, recovery=3, 主 vbmeta 默认 0）。
++BOARD_AVB_RECOVERY_ROLLBACK_INDEX_LOCATION := 3
+ BOARD_AVB_VBMETA_VENDOR := vendor
+ BOARD_AVB_VBMETA_VENDOR_KEY_PATH := vendor/lineage-priv/keys/avb_release.pem
+ BOARD_AVB_VBMETA_VENDOR_ALGORITHM := SHA256_RSA2048
+diff --git a/configs/vintf/manifest.xml b/configs/vintf/manifest.xml
+index feb29e9..ea12f7d 100644
+--- a/configs/vintf/manifest.xml
++++ b/configs/vintf/manifest.xml
+@@ -14,11 +14,6 @@
+         <transport>hwbinder</transport>
+         <fqname>@1.1::IBluetoothHci/default</fqname>
+     </hal>
+-    <hal format="hidl">
+-        <name>android.hardware.camera.provider</name>
+-        <transport>hwbinder</transport>
+-        <fqname>@2.6::ICameraProvider/internal/0</fqname>
+-    </hal>
+     <hal format="hidl">
+         <name>android.hardware.gatekeeper</name>
+         <transport>hwbinder</transport>
+@@ -97,12 +92,6 @@
+         <transport>hwbinder</transport>
+         <fqname>@1.1::IOffloadControl/default</fqname>
+     </hal>
+-    <hal format="hidl">
+-        <name>android.hardware.thermal</name>
+-        <transport>hwbinder</transport>
+-        <fqname>@1.0::IThermal/default</fqname>
+-        <fqname>@2.0::IThermal/default</fqname>
+-    </hal>
+     <hal format="hidl">
+         <name>vendor.mediatek.hardware.apmonitor</name>
+         <transport>hwbinder</transport>
+diff --git a/device.mk b/device.mk
+index fa59da8..168f18b 100644
+--- a/device.mk
++++ b/device.mk
+@@ -62,6 +62,12 @@ PRODUCT_PACKAGES += \
+     android.hardware.fastboot@1.1-impl-mock \
+     fastbootd
+ 
++# A15 fsgen: system_ext/lib 与 lib64 同名 prebuilt .so 改用 cc_prebuilt_library_shared
++# （见 vendor/xiaomi/cannon/Android.bp；原 PRODUCT_COPY_FILES 触发 packaging conflict）
++PRODUCT_PACKAGES += \
++    libcannon_audiotoolkit_system_ext \
++    libcannon_videotelephony_system_ext
++
+ # Audio
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/audio/audio_policy.conf:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy.conf \
+@@ -426,6 +432,8 @@ PRODUCT_PACKAGES += \
+ 
+ PRODUCT_PACKAGES += \
+     libsensorndkbridge \
++    libbase_shim \
++    libshim_cpp_verbose_abort \
+     libshim_sensors \
+     libshim_cannon_vendor \
+     libshim_cannon_system
+diff --git a/extract-files.sh b/extract-files.sh
+index 231719f..32ce017 100755
+--- a/extract-files.sh
++++ b/extract-files.sh
+@@ -61,15 +61,46 @@ function blob_fixup() {
+     vendor/bin/hw/android.hardware.thermal@2.0-service.mtk)
+         "${PATCHELF}" --replace-needed "libutils.so" "libutils-v32.so" "${2}"
+         "${PATCHELF}" --replace-needed "libhidlbase.so" "libhidlbase-v32.so" "${2}"
++        "${PATCHELF}" --add-needed "libshim_cannon_vendor.so" "${2}"
+         ;;
+     vendor/bin/hw/camerahalserver)
+         "${PATCHELF}" --replace-needed "libutils.so" "libutils-v32.so" "${2}"
+         "${PATCHELF}" --replace-needed "libbinder.so" "libbinder-v32.so" "${2}"
+         "${PATCHELF}" --replace-needed "libhidlbase.so" "libhidlbase-v32.so" "${2}"
++        "${PATCHELF}" --add-needed "libshim_cannon_vendor.so" "${2}"
++        ;;
++    # A15 build/ 不再实现 TARGET_LD_SHIM_LIBS，旧垫片机制失效(见 docs/logs)。
++    # 这些 HAL 经传递闭包核对确实缺 libshim_cannon_vendor 的
++    # android::Thread::run / String16 移动构造等符号 → 直接烤进 NEEDED。
++    vendor/bin/hw/android.hardware.gnss-service.mediatek|\
++    vendor/bin/hw/android.hardware.bluetooth@1.1-service-mediatek|\
++    vendor/bin/hw/mtkfusionrild|\
++    vendor/bin/hw/vendor.mediatek.hardware.pq@2.2-service)
++        "${PATCHELF}" --add-needed "libshim_cannon_vendor.so" "${2}"
++        ;;
++    system/lib64/libsource.so|\
++    system/lib64/libsink.so)
++        "${PATCHELF}" --add-needed "libshim_cannon_system.so" "${2}"
+         ;;
+     vendor/bin/mtk_agpsd)
+        "$PATCHELF" --replace-needed "libcrypto.so" "libcrypto-v32.so" "$2"
+         ;;
++    vendor/lib/libnvram.so|\
++    vendor/lib64/libnvram.so|\
++    vendor/lib/libsysenv.so|\
++    vendor/lib64/libsysenv.so|\
++    vendor/lib/nfc_nci.nqx.default.hw.so|\
++    vendor/lib64/nfc_nci.nqx.default.hw.so)
++        # A15 的 libbase 把 android::base::Trim 改成了模板，不再导出旧的非模板符号
++        # _ZN7android4base4TrimERK...；A12 的 libnvram/libsysenv/nfc_nci... 仍引用该符号。
++        # 这三者是"未定义引用方"（libbase/libbinder/libdmabufheap/libreference-ril 自带定义，无关）。
++        # 补 libbase_shim.so 依赖（其 strings.cpp 提供旧 Trim），否则加载它们的进程会
++        # "cannot locate symbol ... Trim" 而 dlopen/exec 失败：
++        #   libnvram → audio HAL / rild / 蓝牙 / nvram_daemon / fuelgauged / wlan_assistant
++        #   libsysenv → ccci_mdinit / ccci_rpcd（基带）
++        #   nfc_nci  → NFC HAL（本机无 NFC 硬件，顺手补齐）
++        "${PATCHELF}" --add-needed "libbase_shim.so" "${2}"
++        ;;
+     vendor/lib*/hw/vendor.mediatek.hardware.pq@2.13-impl.so)
+         "${PATCHELF}" --replace-needed "libutils.so" "libutils-v32.so" "${2}"
+         "${PATCHELF}" --add-needed "libshim_sensors.so" "${2}"
+@@ -88,6 +119,23 @@ function blob_fixup() {
+     vendor/etc/init/vendor.mediatek.hardware.mtkpower@1.0-service.rc)
+         echo "$(cat ${2}) input" > "${2}"
+         ;;
++    # 2026-10-30 第十八轮：gralloc impl 在 sphal 命名空间被 dlopen 时，其依赖
++    # libutilscallstack.so -> libunwindstack.so 引用 A15 libc++ 新符号
++    # std::__1::__libcpp_verbose_abort（_ZNSt3__122__libcpp_verbose_abortEPKcz），
++    # 但 sphal 里 libc++.so 解析到 A12 /vendor/lib64/libc++.so，无此符号 →
++    # dlopen 失败 → "gralloc-mapper is missing" → GraphicBufferMapper LOG_ALWAYS_FATAL
++    # → media.swcodec 崩溃循环（没声）。补只导出该符号的垫片。
++    vendor/lib64/hw/android.hardware.graphics.mapper@4.0-impl-mediatek.so|\
++    vendor/lib/hw/android.hardware.graphics.mapper@4.0-impl-mediatek.so)
++        "${PATCHELF}" --add-needed "libshim_cpp_verbose_abort.so" "${2}"
++        ;;
++    # 2026-10-30 第十九轮：neuron NN HAL 自身 UND 引用旧 android::base::Trim
++    # （_ZN7android4base4TrimERKNSt3__112basic_string...），其 NEEDED 的 A15 libbase.so
++    # 已删除该非模板符号 → 每 5s "cannot locate symbol ...Trim" 崩溃重启（NPC 噪音，
++    # 不杀 system_server）。补 libbase_shim.so（已导出旧 Trim）进 NEEDED。
++    vendor/bin/hw/android.hardware.neuralnetworks@1.3-service-mtk-neuron)
++        "${PATCHELF}" --add-needed "libbase_shim.so" "${2}"
++        ;;
+     esac
+ }
+ 
+diff --git a/libshims/Android.bp b/libshims/Android.bp
+index 44d5878..c365e16 100644
+--- a/libshims/Android.bp
++++ b/libshims/Android.bp
+@@ -42,6 +42,24 @@ cc_library_shared {
+     compile_multilib: "both",
+ }
+ 
++// 2026-10-30 第十八轮：补 A15 libc++ 新符号 std::__1::__libcpp_verbose_abort
++//
++// A15 的 /system/lib64/libunwindstack.so 引用 _ZNSt3__122__libcpp_verbose_abortEPKcz，
++// A12 vendor 的 /vendor/lib64/libc++.so 不提供。当 vendor gralloc HAL 在 sphal 命名空间
++// 被 dlopen 时该符号解析失败 → gralloc-mapper 缺失 → GraphicBufferMapper LOG_ALWAYS_FATAL
++// → media.swcodec 崩溃循环（没声）。垫片只导出这一个符号，patchelf 烤进 gralloc impl。
++cc_library_shared {
++    name: "libshim_cpp_verbose_abort",
++    srcs: [
++        "src/CppVerboseAbort.cpp",
++    ],
++    shared_libs: [
++        "liblog",
++    ],
++    vendor: true,
++    compile_multilib: "both",
++}
++
+ // 传感器符号（convertToSensorEvent）—— 原有垫片，mnld 需要
+ cc_library_shared {
+     name: "libshim_sensors",
+diff --git a/lineage_cannon.mk b/lineage_cannon.mk
+index 863c574..0dd8ece 100644
+--- a/lineage_cannon.mk
++++ b/lineage_cannon.mk
+@@ -23,6 +23,10 @@ PRODUCT_MANUFACTURER := Xiaomi
+ PRODUCT_GMS_CLIENTID_BASE := android-xiaomi
+ 
+ PRODUCT_BUILD_PROP_OVERRIDES += \
+-    PRIVATE_BUILD_DESC="cannong-user 12 SP1A.210812.016 V13.0.3.0.SJEMIXM release-keys"
++    BuildDesc="cannong-user 12 SP1A.210812.016 V13.0.3.0.SJEMIXM release-keys"
++# A15: build.prop 改由 build/soong/scripts/gen_build_prop.py 生成，override key 必须是
++# product_config.json 里的 CamelCase 变量名；旧的 PRIVATE_BUILD_DESC 已不被识别（会报
++# Key "PRIVATE_BUILD_DESC" isn't a valid prop override）。ro.build.description 取自
++# config['BuildDesc']（gen_build_prop.py:274），故此处改用 BuildDesc=（cannon A15 适配）。
+ 
+ BUILD_FINGERPRINT := Redmi/cannong_global/cannong:12/SP1A.210812.016/V13.0.3.0.SJEMIXM:user/release-keys
+diff --git a/sepolicy/vendor/file_contexts b/sepolicy/vendor/file_contexts
+index 74a0661..cf2dcf8 100644
+--- a/sepolicy/vendor/file_contexts
++++ b/sepolicy/vendor/file_contexts
+@@ -24,7 +24,9 @@
+ /(vendor|system/vendor)/bin/hw/android\.hardware\.light-service\.cannon                          u:object_r:hal_light_default_exec:s0
+ 
+ # Sensors
+-/vendor/bin/hw/android\.hardware\.sensors@2.1-service\.cannon-multihal                           u:object_r:mtk_hal_sensors_exec:s0
++# A15: mtk_hal_sensors_exec 在本树未定义(全树无该 type) → 改用 AOSP 内建的 hal_sensors_default_exec
++# (system/sepolicy/vendor/hal_sensors_default.te 定义，sensors multihal 标准域)（cannon A15 适配）
++/vendor/bin/hw/android\.hardware\.sensors@2.1-service\.cannon-multihal                           u:object_r:hal_sensors_default_exec:s0
+ 
+ # Thermals
+ /vendor/bin/mi_thermald       u:object_r:mi_thermald_exec:s0
+@@ -38,3 +40,11 @@
+ # Bluetooth Audio (AIDL) -- runs in hal_audio_default domain to register
+ # android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory (hal_audio_service)
+ /(vendor|system/vendor)/bin/hw/android\.hardware\.bluetooth\.audio-service\.cannon  u:object_r:hal_audio_default_exec:s0
++
++# libshims 垫片（A12 vendor blob 在 A15 上缺 libc++ 新符号 std::__1::__libcpp_verbose_abort）
++# 该垫片被 patchelf 烤进 gralloc mapper impl 的 NEEDED；mapper impl(@4.0-impl-mediatek) 标签
++# 已是 same_process_hal_file，会被 surfaceflinger / mediaswcodec 直接 dlopen → 其 NEEDED 的
++# 垫片必须同为 same_process_hal_file，否则 enforcing 下 surfaceflinger 读它被拒(vendor_file)
++# → mapper dlopen 失败 → "gralloc-mapper is missing" → SF SIGABRT → 卡第一屏(D1)。
++# 与 mapper impl 同标签即可被同一批允许读 same_process_hal_file 的进程读取。
++/(vendor|system/vendor)/lib(64)?/libshim_cpp_verbose_abort\.so   u:object_r:same_process_hal_file:s0
+
+# ===== 新增文件: libshims/src/CppVerboseAbort.cpp =====
++// cannon: A15(Android 15) 的 /system/lib64/libunwindstack.so 引用了一个新的 libc++
++// 符号 std::__1::__libcpp_verbose_abort(char const*, ...)（mangled
++// _ZNSt3__122__libcpp_verbose_abortEPKcz）。该符号在 A15 的 /system/lib64/libc++.so 里
++// 被导出（WEAK），但 A12 vendor 的 /vendor/lib64/libc++.so 没有。
++//
++// 现象：vendor 的 gralloc HAL android.hardware.graphics.mapper@4.0-impl-mediatek.so 在
++// "sphal" 命名空间被 dlopen 时，其依赖 libutilscallstack.so -> libunwindstack.so 的该
++// UND 符号解析到 /vendor/lib64/libc++.so（A12，无此符号）→ dlopen 失败 →
++// "gralloc-mapper is missing" -> GraphicBufferMapper LOG_ALWAYS_FATAL -> media.swcodec
++// 崩溃循环（没声）。
++//
++// 修法：提供一个只导出该符号的垫片，用 patchelf --add-needed 烤进 gralloc impl，
++// 使 libunwindstack 的 UND 在 sphal 命名空间内能被本垫片补齐（与 libbase_shim 同一套路）。
++
++#include <stdarg.h>
++#include <stdlib.h>
++#include <android/log.h>
++
++namespace std {
++inline namespace __1 {
++
++__attribute__((noreturn))
++void __libcpp_verbose_abort(const char* format, ...) {
++    va_list ap;
++    va_start(ap, format);
++    __android_log_vprint(ANDROID_LOG_FATAL, "libc++", format, ap);
++    va_end(ap);
++    abort();
++}
++
++}  // namespace __1
++}  // namespace std

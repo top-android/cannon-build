@@ -5,7 +5,11 @@
 #   ./build.sh init     repo init + 安装 local_manifests
 #   ./build.sh sync     repo sync
 #   ./build.sh build    lunch + m bacon
-#   ./build.sh all      init + sync + build
+#   ./build.sh all      init + sync + build            （A14 / LineageOS 21，默认）
+#   ./build.sh a15      A15 专用：init + sync + apply 补丁 + build（LineageOS 22.2）
+#
+# A14 不受影响：不选 a15、不设 PROFILE=a15 时，行为与旧版完全一致。
+# 也可用环境变量覆盖：PROFILE=a15 ./build.sh all
 #
 set -euo pipefail
 
@@ -18,6 +22,22 @@ LUNCH_TARGET="${LUNCH_TARGET:-lineage_cannon-ap2a-userdebug}"
 MANIFEST_URL="${MANIFEST_URL:-https://github.com/LineageOS/android.git}"
 MANIFEST_BRANCH="${MANIFEST_BRANCH:-lineage-21.0}"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ---- local_manifests 与补丁开关（A14 默认值保持不变）----
+LOCAL_MANIFEST_NAME="${LOCAL_MANIFEST_NAME:-cannon.xml}"
+APPLY_PATCHES="${APPLY_PATCHES:-0}"
+
+# ---- A15 profile（LineageOS 22.2 / Android 15）----
+# 仅在选中 a15 子命令、或有 top-android 已建好 lineage-22.2-cannon 分支时使用。
+# 目标：lunch lineage_cannon-bp1a-user，local_manifests 用 cannon-22.2.xml，
+#       编译前重放 A15 构建期补丁（幂等：仓库里已提交的改动会自动跳过）。
+apply_a15_profile() {
+    MANIFEST_BRANCH="lineage-22.2"
+    LUNCH_TARGET="lineage_cannon-bp1a-user"
+    LOCAL_MANIFEST_NAME="cannon-22.2.xml"
+    APPLY_PATCHES="1"
+}
+[ "${PROFILE:-}" = "a15" ] && apply_a15_profile
 
 c_red()  { printf '\033[31m%s\033[0m\n' "$*"; }
 c_grn()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -75,10 +95,11 @@ cmd_init() {
     $(repo_bin) init -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH" \
         --git-lfs --depth=1 -g default,-notdefault,-infra --no-clone-bundle
 
-    step "安装 local_manifests/cannon.xml"
+    step "安装 local_manifests/$LOCAL_MANIFEST_NAME → .repo/local_manifests/cannon.xml"
     mkdir -p .repo/local_manifests
-    cp "$SRC_DIR/local_manifests/cannon.xml" .repo/local_manifests/cannon.xml
-    c_grn "已写入 .repo/local_manifests/cannon.xml"
+    [ -f "$SRC_DIR/local_manifests/$LOCAL_MANIFEST_NAME" ] || die "缺 local_manifests/$LOCAL_MANIFEST_NAME"
+    cp "$SRC_DIR/local_manifests/$LOCAL_MANIFEST_NAME" .repo/local_manifests/cannon.xml
+    c_grn "已写入 .repo/local_manifests/cannon.xml（源=$LOCAL_MANIFEST_NAME）"
 }
 
 cmd_sync() {
@@ -93,6 +114,18 @@ cmd_sync() {
     else
         c_ylw "vendor/lineage-priv/keys 没拉到（private 仓库，检查 ssh key 和 org 权限）"
     fi
+}
+
+cmd_apply() {
+    if [ "$APPLY_PATCHES" != "1" ]; then
+        c_ylw "非 A15 profile，跳过补丁（A14 不需要）"
+        return 0
+    fi
+    step "应用 A15 构建期补丁（幂等：仓库里已提交的改动会自动跳过）"
+    local script="$SRC_DIR/scripts/apply_a15_cannon_patches.sh"
+    [ -f "$script" ] || die "找不到 $script"
+    CANNON_PATCHDIR="${CANNON_PATCHDIR:-$SRC_DIR/repro/patches/a15}" \
+        bash "$script" "$ROM_DIR"
 }
 
 cmd_build() {
@@ -131,6 +164,7 @@ case "${1:-}" in
     init)   cmd_init ;;
     sync)   cmd_sync ;;
     build)  cmd_build ;;
-    all)    cmd_init; cmd_sync; cmd_build ;;
-    *)      sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
+    all)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;
+    a15)    apply_a15_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
+    *)      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
 esac

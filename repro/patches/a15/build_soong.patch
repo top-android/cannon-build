@@ -1,0 +1,55 @@
+diff --git a/etc/prebuilt_etc.go b/etc/prebuilt_etc.go
+index c7935d3..4a0db43 100644
+--- a/etc/prebuilt_etc.go
++++ b/etc/prebuilt_etc.go
+@@ -853,6 +853,35 @@ func PrebuiltRenderScriptBitcodeFactory() android.Module {
+ 	return module
+ }
+ 
++// cannon(A15) fsgen fix: prebuilt modules synthesized from PRODUCT_COPY_FILES whose dest dir
++// is exactly "lib" or "lib64". The stock fsgen maps both dirs to
++// PrebuiltRenderScriptBitcodeFactory (MultilibBoth), which builds BOTH arm and arm64 variants
++// from a single src. When the same basename exists in both <part>/lib and <part>/lib64 (very
++// common for vendor blobs copied via PRODUCT_COPY_FILES), the arm64 variant of the "lib"
++// module and the arm64 variant of the "lib64" module both land at lib64/<name> ->
++// "packaging conflict" (and likewise at lib/<name>). Using MultilibCommon (a single
++// android_common variant, same pattern as PrebuiltAnyFactory) installs each copy verbatim
++// into exactly its literal dir, so no cross-arch duplication / conflict occurs. Because
++// Common.Multilib == "", installBaseDir keeps the literal base ("lib"/"lib64").
++func PrebuiltLibFactory() android.Module {
++	module := &PrebuiltEtc{}
++	InitPrebuiltEtcModule(module, "lib")
++	// This module is device-only
++	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
++	android.InitDefaultableModule(module)
++	return module
++}
++
++// prebuilt_lib64 installs verbatim into <partition>/lib64. See PrebuiltLibFactory.
++func PrebuiltLib64Factory() android.Module {
++	module := &PrebuiltEtc{}
++	InitPrebuiltEtcModule(module, "lib64")
++	// This module is device-only
++	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
++	android.InitDefaultableModule(module)
++	return module
++}
++
+ // prebuilt_rfsa installs a firmware file that will be available through Qualcomm's RFSA
+ // to the <partition>/lib/rfsa directory.
+ func PrebuiltRFSAFactory() android.Module {
+diff --git a/fsgen/prebuilt_etc_modules_gen.go b/fsgen/prebuilt_etc_modules_gen.go
+index e4bb07c..5bdce58 100644
+--- a/fsgen/prebuilt_etc_modules_gen.go
++++ b/fsgen/prebuilt_etc_modules_gen.go
+@@ -202,8 +202,8 @@ var (
+ 		"first_stage_ramdisk": etc.PrebuiltFirstStageRamdiskFactory,
+ 		"fonts":               etc.PrebuiltFontFactory,
+ 		"framework":           etc.PrebuiltFrameworkFactory,
+-		"lib":                 etc.PrebuiltRenderScriptBitcodeFactory,
+-		"lib64":               etc.PrebuiltRenderScriptBitcodeFactory,
++		"lib":                 etc.PrebuiltLibFactory,
++		"lib64":               etc.PrebuiltLib64Factory,
+ 		"lib/rfsa":            etc.PrebuiltRFSAFactory,
+ 		"media":               etc.PrebuiltMediaFactory,
+ 		"odm":                 etc.PrebuiltOdmFactory,
