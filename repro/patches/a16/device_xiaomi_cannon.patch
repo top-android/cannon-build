@@ -1,8 +1,56 @@
 diff --git a/device.mk b/device.mk
-index 168f18b..c332a00 100644
+index 168f18b..c8aae41 100644
 --- a/device.mk
 +++ b/device.mk
-@@ -401,7 +401,7 @@ PRODUCT_PACKAGES += \
+@@ -143,9 +143,11 @@ PRODUCT_PACKAGES += \
+     disable_configstore
+ 
+ # Display
++# A16-D7: memtrack 源码 HAL 在 A16 更名为 android.hardware.memtrack-service.mediatek
++# （A15 为 -mali 后缀；A16 的 memtrack 源码已含 MemtrackDeviceMali.cpp，等价）。
+ PRODUCT_PACKAGES += \
+     android.hardware.graphics.composer@2.1-service \
+-    android.hardware.memtrack-service.mediatek-mali
++    android.hardware.memtrack-service.mediatek
+ 
+ PRODUCT_PACKAGES += \
+     libfmq \
+@@ -224,12 +226,17 @@ PRODUCT_PACKAGES += \
+     libavservices_minijail_vendor
+ 
+ # Vibrator
++# A16-D7: A16 淘汰 HIDL vibrator@1.0-impl（AOSP vibrator/1.0 已删），改用 mediatek AIDL
++# vibrator 源码 HAL（hardware/mediatek/aidl/vibrator，android.hardware.vibrator-V2-ndk）。
+ PRODUCT_PACKAGES += \
+-    android.hardware.vibrator@1.0-impl:64
++    android.hardware.vibrator-service.mediatek
+ 
+ # CAS
++# A16-D2: 改为直接安装基模块，避免 -lazy 的 overrides 把基模块 cas@1.2-service
++# （compile_multilib:prefer32，仅 arm 变体）记成 overridden_dep 后被 fsgen 生成的
++# "both" vendor image 要求出 arm64 变体 → "missing variant ... arm64" 报错。
+ PRODUCT_PACKAGES += \
+-    android.hardware.cas@1.2-service-lazy
++    android.hardware.cas@1.2-service
+ 
+ # Neural Networks
+ PRODUCT_PACKAGES += \
+@@ -381,9 +388,12 @@ PRODUCT_PACKAGES += \
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/gnss/agps_profiles_conf2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/gnss/agps_profiles_conf2.xml
+ 
++# A16-D7: android.hardware.gnss-V1-ndk_platform 在 A16 已 VNDK 化（vndk_prebuilt_shared，
++# LOCAL_MODULE 带 .vndk.31/32 后缀且 UNINSTALLABLE），不能作为 PRODUCT_PACKAGES 基名引用；
++# 该 .so 已由 vendor/xiaomi/cannon/cannon-vendor.mk 从 proprietary COPY 到 vendor/lib(64)。
++# 故从 PRODUCT_PACKAGES 移除，仅保留 gnss@2.1.vendor 接口。
+ PRODUCT_PACKAGES += \
+-    android.hardware.gnss@2.1.vendor \
+-    android.hardware.gnss-V1-ndk_platform.vendor
++    android.hardware.gnss@2.1.vendor
+ 
+ # Public libraries
+ PRODUCT_COPY_FILES += \
+@@ -401,7 +411,7 @@ PRODUCT_PACKAGES += \
      init.connectivity.rc \
      init.modem.rc \
      init.mt6853.rc \
