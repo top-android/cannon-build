@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  cannon A16 local_manifests 草稿（LineageOS 23.x / Android 16）
+  目标系统：LineageOS 23.x，分支 lineage-23.2（2026-10-30 实测 LineageOS/android.git 存在 lineage-23.2）
+
+  用法：放到源码树 .repo/local_manifests/cannon.xml（配合 repo init -b lineage-23.2）
+  说明：只有“我们自有、上游 LineageOS 没有”的 4 个仓（device/vendor/kernel/wlan）需要自带分支；
+       其余 AOSP 侧改动一律走 LineageOS 上游 + build-time 补丁（沿用 A15 的 apply 方案），
+       绝不为每个仓建 fork——这是 A15 已验证的路线。
+  前置：4 自有仓须先建好 lineage-23.2-cannon 分支（本仓脚本/命令），否则 sync 会失败。
+-->
+<manifest>
+    <remote name="devs" fetch="https://github.com" />
+    <remote name="top-ssh" fetch="ssh://git@github.com/top-android" />
+
+    <!-- ========= 1) 我们自带分支：A16 = lineage-23.2-cannon ========= -->
+    <project path="device/xiaomi/cannon"
+             name="top-android/android_device_xiaomi_cannon"
+             remote="devs" revision="lineage-23.2-cannon" />
+
+    <project path="vendor/xiaomi/cannon"
+             name="top-android/android_vendor_xiaomi_cannon"
+             remote="devs" revision="lineage-23.2-cannon" />
+
+    <project path="kernel/xiaomi/cannon"
+             name="top-android/android_kernel_xiaomi_cannon"
+             remote="devs" revision="lineage-23.2-cannon" />
+
+    <project path="hardware/mediatek/wlan"
+             name="top-android/android_hardware_mediatek_wlan"
+             remote="devs" revision="lineage-23.2-cannon" />
+
+    <!-- ========= 2) 走上游 lineage-23.2，补丁 build-time apply ========= -->
+    <project path="hardware/mediatek"
+             name="LineageOS/android_hardware_mediatek"
+             remote="devs" revision="lineage-23.2" />
+
+    <project path="hardware/xiaomi"
+             name="LineageOS/android_hardware_xiaomi"
+             remote="devs" revision="lineage-23.2" />
+
+    <project path="device/mediatek/sepolicy_vndr"
+             name="LineageOS/android_device_mediatek_sepolicy_vndr"
+             remote="devs" revision="lineage-23.2" />
+
+    <!-- ========= 3) 不在本清单的 AOSP 侧补丁项目 =========
+         build/make, build/soong, frameworks/base, frameworks/native,
+         frameworks/opt/telephony, system/core, system/libhidl, system/bpf,
+         packages/modules/Wifi, packages/modules/Connectivity, vendor/lineage,
+         hardware/lineage/compat 等 —— 来自 A16 主 manifest，不 override，
+         由 apply_* 补丁在编译前打（按症状签名重定位到 A16 源码，勿照抄 A15 行号）。 -->
+
+    <!-- ========= 4) 私有签名/AVB key（关键，勿删，仅存在于 rom，不入配置仓） ========= -->
+    <project path="vendor/lineage-priv/keys"
+             name="android_vendor_lineage-priv_keys"
+             remote="top-ssh" revision="main" />
+</manifest>

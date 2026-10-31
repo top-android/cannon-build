@@ -33,7 +33,7 @@ index a251af8..2a06452 100644
  
      /**
 diff --git a/service/java/com/android/server/wifi/WifiVendorHal.java b/service/java/com/android/server/wifi/WifiVendorHal.java
-index 13b659f..d09c6c8 100644
+index 13b659f..816058e 100644
 --- a/service/java/com/android/server/wifi/WifiVendorHal.java
 +++ b/service/java/com/android/server/wifi/WifiVendorHal.java
 @@ -868,40 +868,19 @@ public class WifiVendorHal {
@@ -84,3 +84,19 @@ index 13b659f..d09c6c8 100644
          if (mWifiGlobals.isWpa3SaeH2eSupported()) {
              featureSet.set(WifiManager.WIFI_FEATURE_SAE_H2E);
          }
+@@ -1435,7 +1414,14 @@ public class WifiVendorHal {
+     public WlanWakeReasonAndCounts getWlanWakeReasonCount() {
+         synchronized (sLock) {
+             if (mWifiChip == null) return null;
+-            return mWifiChip.getDebugHostWakeReasonStats();
++            // cannon A15 老 vendor 适配（移植自 A14 修法）：MTK 闭源 libwifi-hal.so 的
++            // getHalInfo() 不判空。本链路 WifiChip::getDebugHostWakeReasonStatsInternal()
++            // -> WifiLegacyHal::getWakeReasonStats(getFirstActiveWlanIfaceName())
++            // -> wifi_get_driver_memory_dump() -> getHalInfo(handle)；只要接口句柄表里对应项为空
++            // 就解引用空指针 SIGSEGV(fault 0x0) 打死整个 wifi HAL（wlan0+ap0 一起消失）。
++            // 触发者日常：dumpsys wifi / bugreport 的 WifiServiceImpl.dump()。此统计仅用于 dumpsys，
++            // 直接不向 HAL 取。A15 原先漏了这处（只带了特性集那半），补齐。
++            return null;
+         }
+     }
+ 

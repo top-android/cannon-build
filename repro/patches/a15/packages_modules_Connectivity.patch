@@ -19,6 +19,121 @@ index 0fbcb5a..653b49f 100644
 -    reboot_on_failure reboot,bpfloader-failed
 +    # [DEBUG bpfloader] reboot_on_failure reboot,bpfloader-failed   # 由 apply_bpfloader_reboot_disable.sh 注释：BPF 失败不秒重启，改抓日志
      override
+diff --git a/staticlibs/device/com/android/net/module/util/PrivateAddressCoordinator.java b/staticlibs/device/com/android/net/module/util/PrivateAddressCoordinator.java
+index bb95585..870a6bb 100644
+--- a/staticlibs/device/com/android/net/module/util/PrivateAddressCoordinator.java
++++ b/staticlibs/device/com/android/net/module/util/PrivateAddressCoordinator.java
+@@ -19,6 +19,7 @@ import static android.net.NetworkCapabilities.TRANSPORT_VPN;
+ import static android.net.TetheringManager.CONNECTIVITY_SCOPE_GLOBAL;
+ import static android.net.TetheringManager.CONNECTIVITY_SCOPE_LOCAL;
+ import static android.net.TetheringManager.TETHERING_BLUETOOTH;
++import static android.net.TetheringManager.TETHERING_WIFI;
+ import static android.net.TetheringManager.TETHERING_WIFI_P2P;
+ 
+ import static com.android.net.module.util.Inet4AddressUtils.inet4AddressToIntHTH;
+@@ -34,7 +35,10 @@ import android.net.LinkProperties;
+ import android.net.Network;
+ import android.net.NetworkCapabilities;
+ import android.os.RemoteException;
++import android.os.SystemProperties;
++import android.provider.Settings;
+ import android.util.ArrayMap;
++import android.util.Log;
+ 
+ import androidx.annotation.Nullable;
+ 
+@@ -81,6 +85,15 @@ public class PrivateAddressCoordinator {
+     private final ArrayMap<Ipv4PrefixRequest, LinkAddress> mDownstreams;
+     private static final String LEGACY_WIFI_P2P_IFACE_ADDRESS = "192.168.49.1/24";
+     private static final String LEGACY_BLUETOOTH_IFACE_ADDRESS = "192.168.44.1/24";
++
++    private static final String TAG = "PrivateAddressCoordinator";
++    // cannon: user-configurable Wi-Fi hotspot subnet, e.g. "192.168.7.0/24".
++    // Empty (default) keeps stock random-prefix behavior. Set with:
++    //   adb shell setprop persist.sys.cannon.hotspot.subnet 192.168.7.0/24
++    // Toggling the hotspot off/on applies it (the address is cached while running).
++    public static final String PROP_CUSTOM_WIFI_SUBNET = "persist.sys.cannon.hotspot.subnet";
++    /** 与 Settings UI（WifiHotspotCustomSubnetSettings）约定的 Settings.Global 键。 */
++    public static final String SETTINGS_GLOBAL_CUSTOM_SUBNET_KEY = "cannon_hotspot_subnet";
+     private final List<IpPrefix> mTetheringPrefixes;
+     // A supplier that returns ConnectivityManager#getAllNetworks.
+     private final Supplier<Network[]> mGetAllNetworksSupplier;
+@@ -107,6 +120,17 @@ public class PrivateAddressCoordinator {
+         public boolean isFeatureEnabled(String featureName) {
+             return DeviceConfigUtils.isTetheringFeatureEnabled(mContext, featureName);
+         }
++
++        /** cannon: read the user-configured Wi-Fi hotspot subnet (empty string = stock behavior). */
++        public String getCustomWifiSubnet() {
++            // 优先读 Settings.Global（设置 UI 写入），其次退回系统属性（adb setprop 兼容）。
++            final String fromGlobal = Settings.Global.getString(
++                    mContext.getContentResolver(), SETTINGS_GLOBAL_CUSTOM_SUBNET_KEY);
++            if (fromGlobal != null && !fromGlobal.isEmpty()) {
++                return fromGlobal;
++            }
++            return SystemProperties.get(PROP_CUSTOM_WIFI_SUBNET, "");
++        }
+     }
+ 
+     public PrivateAddressCoordinator(Supplier<Network[]> getAllNetworksSupplier, Context context) {
+@@ -208,6 +232,41 @@ public class PrivateAddressCoordinator {
+     // TODO: There needs to be a reserveDownstreamAddress() method for the cases where
+     // TetheringRequest has been set a static IPv4 address.
+ 
++    /**
++     * cannon: return the gateway address inside the user-configured Wi-Fi hotspot subnet, or null
++     * when no custom subnet is set / it is invalid / it conflicts with an upstream prefix.
++     */
++    @Nullable
++    private LinkAddress getCustomWifiDownstreamAddress(final int interfaceType) {
++        if (interfaceType != TETHERING_WIFI) return null;
++        final String subnet = mDeps.getCustomWifiSubnet();
++        if (subnet == null || subnet.isEmpty()) return null;
++        try {
++            final IpPrefix range = new IpPrefix(subnet);
++            if (range.getPrefixLength() != PREFIX_LENGTH) {
++                Log.w(TAG, "cannon: custom hotspot subnet must be a /" + PREFIX_LENGTH
++                        + ", got '" + subnet + "'; ignoring");
++                return null;
++            }
++            final int prefixRangeMask = prefixLengthToV4NetmaskIntHTH(PREFIX_LENGTH);
++            final int base =
++                    inet4AddressToIntHTH((Inet4Address) range.getAddress()) & prefixRangeMask;
++            // Normalize to the /24 network prefix for upstream-conflict detection.
++            final IpPrefix network = new IpPrefix(intToInet4AddressHTH(base), PREFIX_LENGTH);
++            if (getConflictWithUpstream(network) != null) {
++                Log.w(TAG, "cannon: custom hotspot subnet " + subnet
++                        + " conflicts with an upstream prefix; falling back to random");
++                return null;
++            }
++            // Gateway is the first usable host address, e.g. 192.168.7.1.
++            final InetAddress gateway = intToInet4AddressHTH(base | 1);
++            return new LinkAddress(gateway, PREFIX_LENGTH);
++        } catch (RuntimeException e) {
++            Log.w(TAG, "cannon: invalid custom hotspot subnet '" + subnet + "'; ignoring", e);
++            return null;
++        }
++    }
++
+     /**
+      * Request a downstream address for the provided IIpv4PrefixRequest.
+      *
+@@ -220,6 +279,15 @@ public class PrivateAddressCoordinator {
+             IIpv4PrefixRequest request) {
+         final Ipv4PrefixRequest wrappedRequest = new Ipv4PrefixRequest(request);
+         final AddressKey addrKey = new AddressKey(interfaceType, scope);
++
++        // cannon: honor a user-configured Wi-Fi hotspot subnet if one is set and usable.
++        final LinkAddress customAddress = getCustomWifiDownstreamAddress(interfaceType);
++        if (customAddress != null) {
++            mCachedAddresses.put(addrKey, customAddress);
++            mDownstreams.put(wrappedRequest, customAddress);
++            return customAddress;
++        }
++
+         // This ensures that tethering isn't started on 2 different interfaces with the same type.
+         // Once tethering could support multiple interface with the same type,
+         // TetheringSoftApCallback would need to handle it among others.
 diff --git a/staticlibs/device/com/android/net/module/util/SingleWriterBpfMap.java b/staticlibs/device/com/android/net/module/util/SingleWriterBpfMap.java
 index a638cc4..3de3803 100644
 --- a/staticlibs/device/com/android/net/module/util/SingleWriterBpfMap.java

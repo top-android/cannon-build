@@ -1,5 +1,5 @@
 diff --git a/BoardConfig.mk b/BoardConfig.mk
-index 998b8c7..016963f 100644
+index 998b8c7..fdb168b 100644
 --- a/BoardConfig.mk
 +++ b/BoardConfig.mk
 @@ -95,6 +95,20 @@ TARGET_COPY_OUT_PRODUCT := product
@@ -35,6 +35,16 @@ index 998b8c7..016963f 100644
  BOARD_AVB_VBMETA_VENDOR := vendor
  BOARD_AVB_VBMETA_VENDOR_KEY_PATH := vendor/lineage-priv/keys/avb_release.pem
  BOARD_AVB_VBMETA_VENDOR_ALGORITHM := SHA256_RSA2048
+@@ -179,6 +196,9 @@ WIFI_DRIVER_STATE_CTRL_PARAM := "/dev/wmtWifi"
+ WIFI_DRIVER_STATE_ON := "1"
+ WIFI_DRIVER_STATE_OFF := "0"
+ WIFI_HIDL_UNIFIED_SUPPLICANT_SERVICE_RC_ENTRY := true
++# [cannon 实验B] 让源码编译的 wifi HAL 在 setMacAddress 里跳过 getSupportedFeatureSet（对失效 iface 句柄
++# 解引用 → wifi_get_supported_feature_set fault 0x10 崩溃）。此宏只作用于源码 HAL，需配合实验A（已删预编译 blob 覆盖）。
++WIFI_AVOID_IFACE_RESET_MAC_CHANGE := true
+ 
+ # A12 厂商 blob ↔ A14 框架库 的符号缺失兼容（LineageOS 官方 LD_SHIM_LIBS 机制）
+ # 原理：bionic/linker 在加载左侧目标时，把右侧垫片预加载进同一进程/命名空间，
 diff --git a/configs/vintf/manifest.xml b/configs/vintf/manifest.xml
 index feb29e9..ea12f7d 100644
 --- a/configs/vintf/manifest.xml
@@ -194,6 +204,44 @@ index 44d5878..c365e16 100644
  // 传感器符号（convertToSensorEvent）—— 原有垫片，mnld 需要
  cc_library_shared {
      name: "libshim_sensors",
+diff --git a/libshims/src/CppVerboseAbort.cpp b/libshims/src/CppVerboseAbort.cpp
+new file mode 100644
+index 0000000..3973430
+--- /dev/null
++++ b/libshims/src/CppVerboseAbort.cpp
+@@ -0,0 +1,32 @@
++// cannon: A15(Android 15) 的 /system/lib64/libunwindstack.so 引用了一个新的 libc++
++// 符号 std::__1::__libcpp_verbose_abort(char const*, ...)（mangled
++// _ZNSt3__122__libcpp_verbose_abortEPKcz）。该符号在 A15 的 /system/lib64/libc++.so 里
++// 被导出（WEAK），但 A12 vendor 的 /vendor/lib64/libc++.so 没有。
++//
++// 现象：vendor 的 gralloc HAL android.hardware.graphics.mapper@4.0-impl-mediatek.so 在
++// "sphal" 命名空间被 dlopen 时，其依赖 libutilscallstack.so -> libunwindstack.so 的该
++// UND 符号解析到 /vendor/lib64/libc++.so（A12，无此符号）→ dlopen 失败 →
++// "gralloc-mapper is missing" -> GraphicBufferMapper LOG_ALWAYS_FATAL -> media.swcodec
++// 崩溃循环（没声）。
++//
++// 修法：提供一个只导出该符号的垫片，用 patchelf --add-needed 烤进 gralloc impl，
++// 使 libunwindstack 的 UND 在 sphal 命名空间内能被本垫片补齐（与 libbase_shim 同一套路）。
++
++#include <stdarg.h>
++#include <stdlib.h>
++#include <android/log.h>
++
++namespace std {
++inline namespace __1 {
++
++__attribute__((noreturn))
++void __libcpp_verbose_abort(const char* format, ...) {
++    va_list ap;
++    va_start(ap, format);
++    __android_log_vprint(ANDROID_LOG_FATAL, "libc++", format, ap);
++    va_end(ap);
++    abort();
++}
++
++}  // namespace __1
++}  // namespace std
 diff --git a/lineage_cannon.mk b/lineage_cannon.mk
 index 863c574..0dd8ece 100644
 --- a/lineage_cannon.mk
@@ -237,37 +285,3 @@ index 74a0661..cf2dcf8 100644
 +# → mapper dlopen 失败 → "gralloc-mapper is missing" → SF SIGABRT → 卡第一屏(D1)。
 +# 与 mapper impl 同标签即可被同一批允许读 same_process_hal_file 的进程读取。
 +/(vendor|system/vendor)/lib(64)?/libshim_cpp_verbose_abort\.so   u:object_r:same_process_hal_file:s0
-
-# ===== 新增文件: libshims/src/CppVerboseAbort.cpp =====
-+// cannon: A15(Android 15) 的 /system/lib64/libunwindstack.so 引用了一个新的 libc++
-+// 符号 std::__1::__libcpp_verbose_abort(char const*, ...)（mangled
-+// _ZNSt3__122__libcpp_verbose_abortEPKcz）。该符号在 A15 的 /system/lib64/libc++.so 里
-+// 被导出（WEAK），但 A12 vendor 的 /vendor/lib64/libc++.so 没有。
-+//
-+// 现象：vendor 的 gralloc HAL android.hardware.graphics.mapper@4.0-impl-mediatek.so 在
-+// "sphal" 命名空间被 dlopen 时，其依赖 libutilscallstack.so -> libunwindstack.so 的该
-+// UND 符号解析到 /vendor/lib64/libc++.so（A12，无此符号）→ dlopen 失败 →
-+// "gralloc-mapper is missing" -> GraphicBufferMapper LOG_ALWAYS_FATAL -> media.swcodec
-+// 崩溃循环（没声）。
-+//
-+// 修法：提供一个只导出该符号的垫片，用 patchelf --add-needed 烤进 gralloc impl，
-+// 使 libunwindstack 的 UND 在 sphal 命名空间内能被本垫片补齐（与 libbase_shim 同一套路）。
-+
-+#include <stdarg.h>
-+#include <stdlib.h>
-+#include <android/log.h>
-+
-+namespace std {
-+inline namespace __1 {
-+
-+__attribute__((noreturn))
-+void __libcpp_verbose_abort(const char* format, ...) {
-+    va_list ap;
-+    va_start(ap, format);
-+    __android_log_vprint(ANDROID_LOG_FATAL, "libc++", format, ap);
-+    va_end(ap);
-+    abort();
-+}
-+
-+}  // namespace __1
-+}  // namespace std

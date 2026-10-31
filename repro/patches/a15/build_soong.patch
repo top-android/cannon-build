@@ -53,3 +53,33 @@ index e4bb07c..5bdce58 100644
  		"lib/rfsa":            etc.PrebuiltRFSAFactory,
  		"media":               etc.PrebuiltMediaFactory,
  		"odm":                 etc.PrebuiltOdmFactory,
+diff --git a/scripts/gen_build_prop.py b/scripts/gen_build_prop.py
+index 51c3853..6b3836a 100644
+--- a/scripts/gen_build_prop.py
++++ b/scripts/gen_build_prop.py
+@@ -214,18 +214,10 @@ def generate_build_info(args):
+     print(f"ro.build.id?={config['BuildId']}")
+ 
+   # ro.build.display.id is shown under Settings -> About Phone
+-  if config["BuildVariant"] == "user":
+-    # User builds should show:
+-    # release build number or branch.buld_number non-release builds
+-
+-    # Dev. branches should have DISPLAY_BUILD_NUMBER set
+-    if config["DisplayBuildNumber"]:
+-      print(f"ro.build.display.id?={config['BuildId']}.{config['BuildNumber']} {config['BuildKeys']}")
+-    else:
+-      print(f"ro.build.display.id?={config['BuildId']} {config['BuildKeys']}")
+-  else:
+-    # Non-user builds should show detailed build information (See build desc above)
+-    print(f"ro.build.display.id?={config['LineageDesc']}")
++  # cannon: 不管是 eng / userdebug / user，设置里只显示 "产品名-构建变体"（如 lineage_cannon-user），
++  # 不暴露 "15 BP1A.xxx eng.root release-keys" 这类细节（原逻辑：user 分支显示 BuildId+BuildKeys，
++  # 非 user 分支显示完整 LineageDesc）
++  print(f"ro.build.display.id?={config['BuildFlavor']}")
+   print(f"ro.build.version.incremental={config['BuildNumber']}")
+   print(f"ro.build.version.sdk={config['Platform_sdk_version']}")
+   print(f"ro.build.version.sdk_minor={build_flags['RELEASE_PLATFORM_SDK_MINOR_VERSION']}")
+
+# ===== 新增文件: scripts/__pycache__/ =====
+# （二进制文件，内容略，由脚本再生）

@@ -1,0 +1,334 @@
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index dab6996..6e31055 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -2645,6 +2645,24 @@
+     <!-- The footer message for Wi-Fi hotspot security settings [CHAR LIMIT=NONE] -->
+     <string name="wifi_hotspot_security_footer">Security settings may change if you change the hotspot’s frequency</string>
+ 
++    <!-- Cannon: 自定义热点网段（WLAN 热点子菜单） -->
++    <!-- Title of the custom hotspot subnet submenu [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_title">自定义网段</string>
++    <!-- Title of the subnet edit box [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_edit_title">网段</string>
++    <!-- Dialog title when editing the subnet [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_dialog_title">设置热点网段</string>
++    <!-- Dialog hint describing the expected format [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_dialog_message">格式：192.168.7.0/24（仅支持 /24）。任意网段均可设置；若非常见私网段（10/8、172.16/12、192.168/16）仅作提示，不会阻止保存。留空表示由系统自动随机选择。关闭并重新开启热点后生效。</string>
++    <!-- Summary shown when no custom subnet is set (system picks automatically) [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_summary_auto">自动（系统随机分配）</string>
++    <!-- Toast shown when the input is not a valid /24 subnet [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_invalid">格式无效，请输入形如 192.168.7.0/24</string>
++    <!-- Toast shown when the input is a valid /24 but not an RFC1918 private subnet [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_not_private">提示：该网段非常见私网段（10.0.0.0/8、172.16.0.0/12、192.168.0.0/16），部分设备可能无法正常连接</string>
++    <!-- Footer explaining the custom subnet feature [CHAR LIMIT=NONE] -->
++    <string name="wifi_hotspot_custom_subnet_footer">自定义网段可避免与其它网络冲突。该网段用于热点下发的客户端地址，网关固定为网络地址 .1。修改后需关闭并重新开启热点才会生效；留空则由系统自动选择。</string>
++
+     <!-- Title for the instant hotspot state [CHAR LIMIT=NONE]-->
+     <string name="wifi_hotspot_instant_title">Instant hotspot</string>
+     <!-- Summary text when instant hotspot is turned on -->
+diff --git a/res/xml/wifi_hotspot_custom_subnet.xml b/res/xml/wifi_hotspot_custom_subnet.xml
+new file mode 100644
+index 0000000..370327a
+--- /dev/null
++++ b/res/xml/wifi_hotspot_custom_subnet.xml
+@@ -0,0 +1,37 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++  ~ Copyright (C) 2026 The LineageOS Project
++  ~
++  ~ Licensed under the Apache License, Version 2.0 (the "License");
++  ~ you may not use this file except in compliance with the License.
++  ~ You may obtain a copy of the License at
++  ~
++  ~      http://www.apache.org/licenses/LICENSE-2.0
++  ~
++  ~ Unless required by applicable law or agreed to in writing, software
++  ~ distributed under the License is distributed on an "AS IS" BASIS,
++  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  ~ See the License for the specific language governing permissions and
++  ~ limitations under the License.
++  -->
++<PreferenceScreen
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:settings="http://schemas.android.com/apk/res-auto"
++    android:title="@string/wifi_hotspot_custom_subnet_title"
++    settings:searchable="false">
++
++    <EditTextPreference
++        android:key="wifi_hotspot_custom_subnet_edit"
++        android:title="@string/wifi_hotspot_custom_subnet_edit_title"
++        android:dialogTitle="@string/wifi_hotspot_custom_subnet_dialog_title"
++        android:dialogMessage="@string/wifi_hotspot_custom_subnet_dialog_message"
++        android:summary="@string/summary_placeholder"
++        android:persistent="false"
++        android:selectAllOnFocus="true"
++        android:inputType="text"/>
++
++    <com.android.settingslib.widget.FooterPreference
++        android:key="wifi_hotspot_custom_subnet_footer"
++        android:title="@string/wifi_hotspot_custom_subnet_footer"/>
++
++</PreferenceScreen>
+diff --git a/res/xml/wifi_tether_settings.xml b/res/xml/wifi_tether_settings.xml
+index 4924bf9..241622d 100644
+--- a/res/xml/wifi_tether_settings.xml
++++ b/res/xml/wifi_tether_settings.xml
+@@ -60,6 +60,12 @@
+         android:fragment="com.android.settings.wifi.tether.WifiHotspotSpeedSettings"
+         settings:isPreferenceVisible="@bool/config_show_wifi_hotspot_speed"/>
+ 
++    <Preference
++        android:key="wifi_hotspot_custom_subnet"
++        android:title="@string/wifi_hotspot_custom_subnet_title"
++        android:summary="@string/summary_placeholder"
++        android:fragment="com.android.settings.wifi.tether.WifiHotspotCustomSubnetSettings"/>
++
+     <Preference
+         android:key="wifi_hotspot_instant"
+         android:title="@string/wifi_hotspot_instant_title"
+diff --git a/src/com/android/settings/wifi/tether/WifiHotspotCustomSubnetSettings.java b/src/com/android/settings/wifi/tether/WifiHotspotCustomSubnetSettings.java
+new file mode 100644
+index 0000000..b5d9a90
+--- /dev/null
++++ b/src/com/android/settings/wifi/tether/WifiHotspotCustomSubnetSettings.java
+@@ -0,0 +1,181 @@
++/*
++ * Copyright (C) 2026 The LineageOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.wifi.tether;
++
++import android.app.settings.SettingsEnums;
++import android.os.Bundle;
++import android.provider.Settings;
++import android.text.TextUtils;
++import android.widget.Toast;
++
++import androidx.annotation.Nullable;
++import androidx.preference.EditTextPreference;
++
++import com.android.settings.R;
++import com.android.settings.dashboard.DashboardFragment;
++
++/**
++ * Cannon: 自定义 WLAN 热点网段（仅支持 /24）。
++ *
++ * <p>用户输入形如 {@code 192.168.7.0/24}，写入
++ * {@link Settings.Global}{@code .cannon_hotspot_subnet}，由
++ * {@code packages/modules/Connectivity} 里的 {@code PrivateAddressCoordinator} 读取并据此
++ * 分配热点（TETHERING_WIFI）的下游地址；网关固定为该网段的 .1。留空表示恢复系统随机网段。
++ *
++ * <p>修改后需关闭并重新开启热点才会生效（地址在运行时缓存）。
++ */
++public class WifiHotspotCustomSubnetSettings extends DashboardFragment {
++    private static final String TAG = "WifiHotspotCustomSubnetSettings";
++
++    /** 与 PrivateAddressCoordinator.Dependencies#getCustomWifiSubnet 约定的 Settings.Global 键。 */
++    public static final String SETTINGS_GLOBAL_KEY = "cannon_hotspot_subnet";
++
++    private static final String KEY_EDIT = "wifi_hotspot_custom_subnet_edit";
++    private static final String SUFFIX = "/24";
++
++    @Nullable
++    private EditTextPreference mEditPref;
++
++    @Override
++    public int getMetricsCategory() {
++        return SettingsEnums.WIFI_TETHER_SETTINGS;
++    }
++
++    @Override
++    protected int getPreferenceScreenResId() {
++        return R.xml.wifi_hotspot_custom_subnet;
++    }
++
++    @Override
++    protected String getLogTag() {
++        return TAG;
++    }
++
++    @Override
++    public void onCreate(Bundle icicle) {
++        super.onCreate(icicle);
++        mEditPref = findPreference(KEY_EDIT);
++        if (mEditPref == null) {
++            return;
++        }
++        refreshState();
++        mEditPref.setOnPreferenceChangeListener((preference, newValue) -> {
++            final String raw = newValue == null ? "" : newValue.toString().trim();
++            if (raw.isEmpty()) {
++                Settings.Global.putString(getContext().getContentResolver(),
++                        SETTINGS_GLOBAL_KEY, "");
++                refreshState();
++                return true;
++            }
++            if (!isValidSubnet(raw)) {
++                Toast.makeText(getContext(), R.string.wifi_hotspot_custom_subnet_invalid,
++                        Toast.LENGTH_SHORT).show();
++                return false;
++            }
++            final String normalized = normalizeSubnet(raw);
++            if (!isPrivateSubnet(normalized)) {
++                // 仅前端提示，不阻止保存：允许任意 /24，非私网段照常写入。
++                Toast.makeText(getContext(), R.string.wifi_hotspot_custom_subnet_not_private,
++                        Toast.LENGTH_SHORT).show();
++            }
++            Settings.Global.putString(getContext().getContentResolver(),
++                    SETTINGS_GLOBAL_KEY, normalized);
++            mEditPref.setText(normalized);
++            mEditPref.setSummary(normalized);
++            return true;
++        });
++    }
++
++    private void refreshState() {
++        if (mEditPref == null) {
++            return;
++        }
++        final String value = Settings.Global.getString(getContext().getContentResolver(),
++                SETTINGS_GLOBAL_KEY);
++        if (TextUtils.isEmpty(value)) {
++            mEditPref.setText("");
++            mEditPref.setSummary(R.string.wifi_hotspot_custom_subnet_summary_auto);
++        } else {
++            mEditPref.setText(value);
++            mEditPref.setSummary(value);
++        }
++    }
++
++    /** 校验 {@code a.b.c.d/24}，四段均为 0-255。 */
++    static boolean isValidSubnet(String s) {
++        if (s == null) {
++            return false;
++        }
++        final String t = s.trim();
++        if (!t.endsWith(SUFFIX)) {
++            return false;
++        }
++        final String ip = t.substring(0, t.length() - SUFFIX.length());
++        final String[] parts = ip.split("\\.");
++        if (parts.length != 4) {
++            return false;
++        }
++        for (String p : parts) {
++            if (p.isEmpty() || p.length() > 3) {
++                return false;
++            }
++            try {
++                final int n = Integer.parseInt(p);
++                if (n < 0 || n > 255) {
++                    return false;
++                }
++            } catch (NumberFormatException e) {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    /**
++     * 校验是否为 RFC1918 私网段：{@code 10.0.0.0/8}、{@code 172.16.0.0/12}、{@code 192.168.0.0/16}。
++     * 入参形如 {@code a.b.c.0/24}（一般为 {@link #normalizeSubnet} 的输出）。
++     */
++    static boolean isPrivateSubnet(String subnet) {
++        if (subnet == null) {
++            return false;
++        }
++        final String t = subnet.trim();
++        final String ip = t.endsWith(SUFFIX) ? t.substring(0, t.length() - SUFFIX.length()) : t;
++        final String[] parts = ip.split("\\.");
++        if (parts.length != 4) {
++            return false;
++        }
++        try {
++            final int a = Integer.parseInt(parts[0]);
++            final int b = Integer.parseInt(parts[1]);
++            // 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16
++            return a == 10
++                    || (a == 172 && b >= 16 && b <= 31)
++                    || (a == 192 && b == 168);
++        } catch (NumberFormatException e) {
++            return false;
++        }
++    }
++
++    /** 归一化为网络地址形式：最后一段强制为 0（后端亦按 /24 掩码）。 */
++    static String normalizeSubnet(String s) {
++        final String t = s.trim();
++        final String ip = t.substring(0, t.length() - SUFFIX.length());
++        final String[] parts = ip.split("\\.");
++        return parts[0] + "." + parts[1] + "." + parts[2] + ".0/24";
++    }
++}
+diff --git a/src/com/android/settings/wifi/tether/WifiTetherSettings.java b/src/com/android/settings/wifi/tether/WifiTetherSettings.java
+index 980dee5..d25b316 100644
+--- a/src/com/android/settings/wifi/tether/WifiTetherSettings.java
++++ b/src/com/android/settings/wifi/tether/WifiTetherSettings.java
+@@ -30,6 +30,8 @@ import android.content.IntentFilter;
+ import android.net.wifi.SoftApConfiguration;
+ import android.os.Bundle;
+ import android.os.UserManager;
++import android.provider.Settings;
++import android.text.TextUtils;
+ import android.util.Log;
+ 
+ import androidx.annotation.Nullable;
+@@ -59,6 +61,8 @@ public class WifiTetherSettings extends RestrictedDashboardFragment
+     private static final String TAG = "WifiTetherSettings";
+     private static final IntentFilter TETHER_STATE_CHANGE_FILTER;
+     private static final String KEY_WIFI_TETHER_SCREEN = "wifi_tether_settings_screen";
++    // 与 WifiHotspotCustomSubnetSettings / PrivateAddressCoordinator 约定的 Settings.Global 键
++    private static final String CUSTOM_SUBNET_GLOBAL_KEY = "cannon_hotspot_subnet";
+ 
+     @VisibleForTesting
+     static final String KEY_WIFI_TETHER_NETWORK_NAME = "wifi_tether_network_name";
+@@ -77,6 +81,8 @@ public class WifiTetherSettings extends RestrictedDashboardFragment
+     static final String KEY_WIFI_HOTSPOT_SPEED = "wifi_hotspot_speed";
+     @VisibleForTesting
+     static final String KEY_INSTANT_HOTSPOT = "wifi_hotspot_instant";
++    @VisibleForTesting
++    static final String KEY_WIFI_HOTSPOT_CUSTOM_SUBNET = "wifi_hotspot_custom_subnet";
+ 
+     @VisibleForTesting
+     SettingsMainSwitchBar mMainSwitchBar;
+@@ -338,6 +344,18 @@ public class WifiTetherSettings extends RestrictedDashboardFragment
+         use(WifiTetherSecurityPreferenceController.class).updateDisplay();
+         use(WifiTetherPasswordPreferenceController.class).updateDisplay();
+         use(WifiTetherMaximizeCompatibilityPreferenceController.class).updateDisplay();
++        updateCustomSubnetSummary();
++    }
++
++    private void updateCustomSubnetSummary() {
++        final Preference customSubnet = findPreference(KEY_WIFI_HOTSPOT_CUSTOM_SUBNET);
++        if (customSubnet == null) {
++            return;
++        }
++        final String value = Settings.Global.getString(getContext().getContentResolver(),
++                CUSTOM_SUBNET_GLOBAL_KEY);
++        customSubnet.setSummary(TextUtils.isEmpty(value)
++                ? getString(R.string.wifi_hotspot_custom_subnet_summary_auto) : value);
+     }
+ 
+     public static final SearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
+@@ -377,6 +395,7 @@ public class WifiTetherSettings extends RestrictedDashboardFragment
+                 keys.add(KEY_WIFI_TETHER_MAXIMIZE_COMPATIBILITY);
+                 keys.add(KEY_WIFI_HOTSPOT_SPEED);
+                 keys.add(KEY_INSTANT_HOTSPOT);
++                keys.add(KEY_WIFI_HOTSPOT_CUSTOM_SUBNET);
+             } else {
+                 if (!isSpeedFeatureAvailable()) {
+                     keys.add(KEY_WIFI_HOTSPOT_SECURITY);

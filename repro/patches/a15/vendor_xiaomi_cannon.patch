@@ -82,7 +82,7 @@ index cf784cd..3f9c650 100644
 +}
 +
 diff --git a/cannon-vendor.mk b/cannon-vendor.mk
-index cb0a1ab..f54fb35 100644
+index cb0a1ab..0aa568d 100644
 --- a/cannon-vendor.mk
 +++ b/cannon-vendor.mk
 @@ -37,10 +37,6 @@ PRODUCT_COPY_FILES += \
@@ -96,7 +96,15 @@ index cb0a1ab..f54fb35 100644
      vendor/xiaomi/cannon/proprietary/vendor/bin/SoterProvisioningTool:$(TARGET_COPY_OUT_VENDOR)/bin/SoterProvisioningTool \
      vendor/xiaomi/cannon/proprietary/vendor/bin/bip_ap:$(TARGET_COPY_OUT_VENDOR)/bin/bip_ap \
      vendor/xiaomi/cannon/proprietary/vendor/bin/bp_kmsetkey_ca:$(TARGET_COPY_OUT_VENDOR)/bin/bp_kmsetkey_ca \
-@@ -1405,7 +1401,6 @@ PRODUCT_COPY_FILES += \
+@@ -1279,7 +1275,6 @@ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libwa_dof.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libwa_dof.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libwa_rtdof.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libwa_rtdof.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libwapi.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libwapi.so \
+-    vendor/xiaomi/cannon/proprietary/vendor/lib64/libwifi-hal.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libwifi-hal.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libwifitest.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libwifitest.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libwpa_client.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libwpa_client.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libwpfa.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libwpfa.so \
+@@ -1405,7 +1400,6 @@ PRODUCT_COPY_FILES += \
      vendor/xiaomi/cannon/proprietary/vendor/thh/ta/fc32e4da17d342449b01c992d56d71bf.ta:$(TARGET_COPY_OUT_VENDOR)/thh/ta/fc32e4da17d342449b01c992d56d71bf.ta
  
  PRODUCT_PACKAGES += \
@@ -104,7 +112,7 @@ index cb0a1ab..f54fb35 100644
      LocationEM2 \
      EngineerMode \
      LPPeService \
-@@ -1429,12 +1424,9 @@ PRODUCT_PACKAGES += \
+@@ -1429,12 +1423,9 @@ PRODUCT_PACKAGES += \
      com.android.hotwordenrollment.common.util \
      android.hardware.neuralnetworks@1.3-service-mtk-dsp-gpu \
      android.hardware.usb@1.2-service-mediatekv2 \
@@ -117,6 +125,14 @@ index cb0a1ab..f54fb35 100644
      gnss-default-manifest
  
  # --- 补齐 93 个缺失文件（2026-10-26 从 #25 vendor.img 提取；#25 实测能开机）---
+@@ -1551,7 +1542,6 @@ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.memtrack-service.mediatek-mali:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.memtrack-service.mediatek-mali \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.nfc@1.2-service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.nfc@1.2-service \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.sensors@2.1-service.cannon-multihal:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.sensors@2.1-service.cannon-multihal \
+-    vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.wifi-service-lazy:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.wifi-service-lazy \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/logwrapper:$(TARGET_COPY_OUT_VENDOR)/bin/logwrapper \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/sh:$(TARGET_COPY_OUT_VENDOR)/bin/sh \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/toolbox:$(TARGET_COPY_OUT_VENDOR)/bin/toolbox \
 diff --git a/gboard/Gboard.apk b/gboard/Gboard.apk
 index c0c5ee0..a29730f 100644
 Binary files a/gboard/Gboard.apk and b/gboard/Gboard.apk differ
