@@ -1,0 +1,28 @@
+diff -ruN '--exclude=.git' up/android_system_core/libutils/binder/RefBase.cpp orph/android_system_core/libutils/binder/RefBase.cpp
+--- up/android_system_core/libutils/binder/RefBase.cpp	2026-10-31 07:15:51.527699133 +0000
++++ orph/android_system_core/libutils/binder/RefBase.cpp	2026-10-31 07:15:55.463874929 +0000
+@@ -477,7 +477,23 @@
+     refs->addStrongRef(id);
+     const int32_t c = refs->mStrong.fetch_add(1, std::memory_order_relaxed);
+ 
+-    LOG_ALWAYS_FATAL_IF(c <= 0 || c == INITIAL_STRONG_VALUE,
++    // Android 14 upstream requires the object to already be strongly owned and
++    // aborts otherwise. A12-era vendor blobs (e.g. the MTK camera HAL) adopt
++    // freshly constructed Thread/RefBase objects through sp<T>::fromExisting()
++    // before any strong reference exists, which upstream rejects. Tolerate
++    // exactly that fresh case by promoting the initial refcount the same way
++    // incStrong() does; keep the fatal check when the strong count has already
++    // dropped to zero (use-after-free). Identical behaviour for owned objects.
++    if (c == INITIAL_STRONG_VALUE) {
++        check_not_on_stack(this);
++        int32_t old __unused = refs->mStrong.fetch_sub(INITIAL_STRONG_VALUE,
++                                                       std::memory_order_relaxed);
++        ALOG_ASSERT(old > INITIAL_STRONG_VALUE, "0x%x too small", old);
++        refs->mBase->onFirstRef();
++        return;
++    }
++
++    LOG_ALWAYS_FATAL_IF(c <= 0,
+                         "incStrongRequireStrong() called on %p which isn't already owned", refs);
+ #if PRINT_REFS
+     ALOGD("incStrong (requiring strong) of %p from %p: cnt=%d\n", this, id, c);

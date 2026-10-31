@@ -17,8 +17,8 @@ cd cannon-build
 
 ./build.sh doctor    # 先体检
 
-# A14（默认）：LineageOS 21
-./build.sh all       # init + sync + build（首次约 60-80G，几小时）
+# A14（默认）：LineageOS 21（上游 + build-time 补丁）
+./build.sh all       # init + sync + apply A14 补丁(幂等) + build（首次约 60-80G，几小时）
 
 # A15：LineageOS 22.2（已适配，产出 user 变体）
 ./build.sh a15       # init(lineage-22.2) + sync + apply A15 补丁(幂等) + build
@@ -27,14 +27,14 @@ cd cannon-build
 ./build.sh a16       # init(lineage-23.2) + sync + apply A16 补丁(幂等) + build
 ```
 
-`a15`/`a16` 与 `all` 的差别只是切几个变量，**`all`（A14）默认行为完全不变**：
+`a15`/`a16` 与 `all` 的差别只是切几个变量；**A14 与 A15/A16 一样，都是「上游 + build-time 补丁」**（原 top-android 快照仓已删）：
 
 | 项 | `all`（A14 默认） | `a15` | `a16` |
 |---|---|---|---|
 | `MANIFEST_BRANCH` | `lineage-21.0` | `lineage-22.2` | `lineage-23.2` |
 | `LOCAL_MANIFEST_NAME` | `cannon.xml` | `cannon-22.2.xml` | `cannon-23.2.xml` |
 | `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | `lineage_cannon-bp1a-user` | `lineage_cannon bp4a userdebug`（三参 lunch） |
-| 编译前补丁 | 无 | `apply_a15_cannon_patches.sh`（幂等，已提交进 fork 的自动跳过） | `apply_a16_cannon_patches.sh`（幂等） |
+| 编译前补丁 | `apply_a14_cannon_patches.sh`（幂等，`repro/patches/a14_orphan/`，11 仓） | `apply_a15_cannon_patches.sh`（幂等） | `apply_a16_cannon_patches.sh`（幂等） |
 
 也可用环境变量临时切：`PROFILE=a15 ./build.sh all` 或 `PROFILE=a16 ./build.sh all`。
 
@@ -58,7 +58,7 @@ cd cannon-build
 | `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | |
 
 > 选 `a15`/`a16`（或 `PROFILE=a15`/`PROFILE=a16`）会覆盖 `MANIFEST_BRANCH` / `LOCAL_MANIFEST_NAME` / `LUNCH_TARGET`
-> 并启用对应的编译前补丁，见上面 profile 对照表；不选就是 A14 默认。A16 的 lunch 走三参（`lineage_cannon bp4a userdebug`）。
+> 并切换到对应的编译前补丁；不选就是 A14 默认（同样会 apply_a14 补丁）。A16 的 lunch 走三参（`lineage_cannon bp4a userdebug`）。
 
 ## 前置条件
 
@@ -69,24 +69,30 @@ cd cannon-build
 
 ## 仓库布局
 
-所有**带本地改动**的仓库都在 `top-android` 下，分支统一 `lineage-21-cannon`；
-没改过的直接用 `LineageOS` 上游 `lineage-21`。见 `local_manifests/cannon.xml`。
+A14/A15/A16 统一走「**上游 LineageOS/AOSP + build-time 补丁**」。只有**上游没有 / 有真历史 / 结构独立**的仓
+（`device`/`vendor`/`kernel`、签名 `keys`、`packages/modules/Wifi`、`hardware/mediatek/wlan`）才用 `top-android` 自有分支；
+其余带改动的仓都指上游，改动以补丁形式在编译前叠加（`repro/patches/{a14_orphan,a15,a16}`）。见 `local_manifests/cannon.xml`。
 
-| 路径 | 上游 | 为什么有改动 |
+下表「上游」列 = 该仓**代码基线**来源（改动以补丁叠加，不再 fork）：
+
+| 路径 | 上游基线 | 为什么有改动 |
 |---|---|---|
-| `device/xiaomi/cannon` | xiaomi-mt6853-devs | 设备树，主战场 |
-| `vendor/xiaomi/cannon` | xiaomi-mt6853-devs | blob 修正 |
+| `device/xiaomi/cannon` | xiaomi-mt6853-devs | 设备树，主战场（top-android 自有分支） |
+| `vendor/xiaomi/cannon` | xiaomi-mt6853-devs | blob 修正（top-android 自有分支） |
 | `kernel/xiaomi/cannon` | top-android | defconfig / emimpu / c2k_usb / bpf 回填；默认取 `lineage-21-cannon`（无 KSU），KSU/SUSFS 见 boot 变体 |
-| `build/make` | LineageOS | core/Makefile、target/board |
-| `frameworks/base` | LineageOS | SystemUI 媒体输出、StorageManager、隐藏 API |
-| `frameworks/native` | LineageOS | binder 兼容 MTK A12 vendor |
-| `frameworks/opt/telephony` | LineageOS | RIL |
-| `hardware/mediatek` | LineageOS | power AIDL |
-| `hardware/mediatek/wlan` | xiaomi-mt6853-devs | wifi_hal 构建 |
-| `packages/modules/Bluetooth` | LineageOS | A2DP / HCI |
-| `packages/modules/NetworkStack` | LineageOS | captive portal 探测地址本地化 |
-| `packages/providers/MediaProvider` | LineageOS | TranscodeHelper |
-| `system/core` | LineageOS | RefBase |
+| `build/make` | LineageOS | core/Makefile、target/board（补丁） |
+| `frameworks/base` | LineageOS | SystemUI 媒体输出、StorageManager、隐藏 API（补丁） |
+| `frameworks/native` | LineageOS | binder 兼容 MTK A12 vendor（补丁） |
+| `frameworks/opt/telephony` | LineageOS | RIL（补丁） |
+| `hardware/mediatek` | LineageOS | power AIDL（补丁） |
+| `hardware/mediatek/wlan` | top-android（上游无独立仓） | wifi_hal 构建（自有分支，A14/15/16 共用） |
+| `packages/modules/Wifi` | top-android | Wifi HAL 特性集 NULL 检查（A14 自有 fork，未删） |
+| `packages/modules/Bluetooth` | LineageOS | A2DP / HCI（补丁） |
+| `packages/modules/NetworkStack` | AOSP（tag r67，A14） | captive portal 探测地址本地化（补丁） |
+| `packages/providers/MediaProvider` | LineageOS | TranscodeHelper（补丁） |
+| `system/core` | LineageOS | RefBase（补丁） |
+| `packages/apps/Jelly` | LineageOS | 拦截 scheme 劫持（补丁） |
+| `packages/apps/Trebuchet` | LineageOS | 最近任务清除全部（补丁） |
 | `vendor/lineage-priv/keys` | 私有仓库 | 签名密钥，**必须 private** |
 
 `device/mediatek/sepolicy_vndr`、`hardware/xiaomi` 无改动，直接走上游。

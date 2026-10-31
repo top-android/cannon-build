@@ -5,11 +5,14 @@
 #   ./build.sh init     repo init + 安装 local_manifests
 #   ./build.sh sync     repo sync
 #   ./build.sh build    lunch + m bacon
-#   ./build.sh all      init + sync + build            （A14 / LineageOS 21，默认）
+#   ./build.sh all      init + sync + apply 补丁 + build（A14 / LineageOS 21，默认）
+#   ./build.sh a14      同 all（A14，显式别名）
 #   ./build.sh a15      A15 专用：init + sync + apply 补丁 + build（LineageOS 22.2）
 #   ./build.sh a16      A16 专用：init + sync + apply 补丁 + build（LineageOS 23.2 / Android 16）
 #
-# A14 不受影响：不选 a15、不设 PROFILE=a15 时，行为与旧版完全一致。
+# 【2026-10-31】A14 也改为「上游 LineageOS/AOSP + build-time 补丁」：
+#   原 top-android/android_* 快照仓已删，A14 现在与 A15/A16 同一套 apply 机制
+#   （local_manifests/cannon.xml 只覆盖自有仓，其余走上游 + apply_a14 补丁）。
 # 也可用环境变量覆盖：PROFILE=a15 ./build.sh all
 #
 set -euo pipefail
@@ -24,13 +27,13 @@ MANIFEST_URL="${MANIFEST_URL:-https://github.com/LineageOS/android.git}"
 MANIFEST_BRANCH="${MANIFEST_BRANCH:-lineage-21.0}"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# ---- local_manifests 与补丁开关（A14 默认值保持不变）----
+# ---- local_manifests 与补丁开关（A14 默认 = 上游 + patch）----
 LOCAL_MANIFEST_NAME="${LOCAL_MANIFEST_NAME:-cannon.xml}"
-APPLY_PATCHES="${APPLY_PATCHES:-0}"
-# ---- 按 profile 选择的辅助变量（A14 默认空）----
+APPLY_PATCHES="${APPLY_PATCHES:-1}"                       # A14 也走 build-time 补丁（原快照仓已删）
+# ---- 按 profile 选择的辅助变量（A14 默认值见下；a15/a16 profile 覆盖）----
 LUNCH_ARGS=()          # 非空时 cmd_build 用多参 lunch（A16 需三参：product release variant）
-APPLY_SCRIPT=""        # profile 决定用哪个 apply_*_cannon_patches.sh
-PATCH_SUBDIR=""        # repro/patches/<PATCH_SUBDIR>（a15 / a16）
+APPLY_SCRIPT="$SRC_DIR/scripts/apply_a14_cannon_patches.sh"   # A14 默认补丁脚本
+PATCH_SUBDIR="a14_orphan"                                     # repro/patches/<PATCH_SUBDIR>（a14_orphan/a15/a16）
 
 # ---- A15 profile（LineageOS 22.2 / Android 15）----
 # 仅在选中 a15 子命令、或有 top-android 已建好 lineage-22.2-cannon 分支时使用。
@@ -140,12 +143,12 @@ cmd_sync() {
 
 cmd_apply() {
     if [ "$APPLY_PATCHES" != "1" ]; then
-        c_ylw "非补丁 profile，跳过补丁（A14 不需要）"
+        c_ylw "未启用补丁（APPLY_PATCHES=0），跳过"
         return 0
     fi
     step "应用构建期补丁（幂等：仓库里已提交的改动会自动跳过）"
     local script="$APPLY_SCRIPT"
-    [ -n "$script" ] || script="$SRC_DIR/scripts/apply_a15_cannon_patches.sh"
+    [ -n "$script" ] || script="$SRC_DIR/scripts/apply_a14_cannon_patches.sh"
     [ -f "$script" ] || die "找不到 $script"
     CANNON_PATCHDIR="${CANNON_PATCHDIR:-$SRC_DIR/repro/patches/${PATCH_SUBDIR:-a15}}" \
         bash "$script" "$ROM_DIR"
@@ -194,6 +197,7 @@ case "${1:-}" in
     sync)   cmd_sync ;;
     build)  cmd_build ;;
     all)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;
+    a14)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a15)    apply_a15_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a16)    apply_a16_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     *)      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;

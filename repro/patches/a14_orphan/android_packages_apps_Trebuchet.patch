@@ -1,0 +1,93 @@
+diff -ruN '--exclude=.git' up/android_packages_apps_Trebuchet/quickstep/res/layout/overview_actions_container.xml orph/android_packages_apps_Trebuchet/quickstep/res/layout/overview_actions_container.xml
+--- up/android_packages_apps_Trebuchet/quickstep/res/layout/overview_actions_container.xml	2026-10-31 07:14:46.997825169 +0000
++++ orph/android_packages_apps_Trebuchet/quickstep/res/layout/overview_actions_container.xml	2026-10-31 07:14:51.141009220 +0000
+@@ -55,6 +55,19 @@
+             android:theme="@style/ThemeControlHighlightWorkspaceColor"
+             android:visibility="gone" />
+ 
++        <!-- cannon: 常驻"清除全部"，不用滚动到任务列表末尾 -->
++        <Space
++            android:layout_width="@dimen/overview_actions_button_spacing"
++            android:layout_height="1dp" />
++
++        <Button
++            android:id="@+id/action_clear_all"
++            style="@style/OverviewActionButton"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:text="@string/recents_clear_all"
++            android:theme="@style/ThemeControlHighlightWorkspaceColor" />
++
+         <Space
+             android:layout_width="0dp"
+             android:layout_height="1dp"
+diff -ruN '--exclude=.git' up/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/OverviewActionsView.java orph/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/OverviewActionsView.java
+--- up/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/OverviewActionsView.java	2026-10-31 07:14:47.028826546 +0000
++++ orph/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/OverviewActionsView.java	2026-10-31 07:14:51.172010597 +0000
+@@ -141,6 +141,12 @@
+         findViewById(R.id.action_screenshot).setOnClickListener(this);
+         mSplitButton = findViewById(R.id.action_split);
+         mSplitButton.setOnClickListener(this);
++
++        // cannon: 常驻"清除全部"按钮（Go 版布局没有这个 id，要判空）
++        View clearAll = findViewById(R.id.action_clear_all);
++        if (clearAll != null) {
++            clearAll.setOnClickListener(this);
++        }
+     }
+ 
+     /**
+@@ -154,10 +160,15 @@
+ 
+     @Override
+     public void onClick(View view) {
++        int id = view.getId();
++        // cannon: 清除全部不依赖 mCallbacks，空态下也要能用
++        if (id == R.id.action_clear_all) {
++            dismissAllTasks();
++            return;
++        }
+         if (mCallbacks == null) {
+             return;
+         }
+-        int id = view.getId();
+         if (id == R.id.action_screenshot) {
+             mCallbacks.onScreenshot();
+         } else if (id == R.id.action_split) {
+@@ -165,6 +176,24 @@
+         }
+     }
+ 
++    /**
++     * cannon: 常驻"清除全部"按钮的点击处理。
++     *
++     * 不挂在 mCallbacks 上，因为 callbacks 只有在某个任务被选中（initOverlay 且 thumbnail
++     * 非空）时才会被设置，overview 空态下按钮就会失效。这里直接从根视图找到同级的
++     * RecentsView 调用它自己的 dismissAllTasks。
++     */
++    private void dismissAllTasks() {
++        View root = getRootView();
++        if (root == null) {
++            return;
++        }
++        View recents = root.findViewById(R.id.overview_panel);
++        if (recents instanceof RecentsView) {
++            ((RecentsView) recents).dismissAllTasks(this);
++        }
++    }
++
+     @Override
+     protected void onConfigurationChanged(Configuration newConfig) {
+         super.onConfigurationChanged(newConfig);
+diff -ruN '--exclude=.git' up/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java orph/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java
+--- up/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java	2026-10-31 07:14:47.028826546 +0000
++++ orph/android_packages_apps_Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java	2026-10-31 07:14:51.172010597 +0000
+@@ -4209,7 +4209,7 @@
+     }
+ 
+     @SuppressWarnings("unused")
+-    private void dismissAllTasks(View view) {
++    public void dismissAllTasks(View view) {
+         runDismissAnimation(createAllTasksDismissAnimation(DISMISS_TASK_DURATION));
+         mActivity.getStatsLogManager().logger().log(LAUNCHER_TASK_CLEAR_ALL);
+     }

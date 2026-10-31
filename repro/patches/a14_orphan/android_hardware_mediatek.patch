@@ -1,0 +1,91 @@
+diff --git a/aidl/power-mediatek/Android.mk b/aidl/power-mediatek/Android.mk
+index 8350c43..6daf26f 100644
+--- a/aidl/power-mediatek/Android.mk
++++ b/aidl/power-mediatek/Android.mk
+@@ -5,8 +5,10 @@ include $(CLEAR_VARS)
+ LOCAL_MODULE := android.hardware.power-service-mediatek
+ LOCAL_VENDOR_MODULE := true
+ LOCAL_MULTILIB := 64
++LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_VINTF_FRAGMENTS := power-mtk.xml
+-LOCAL_SRC_FILES := Power.cpp
++LOCAL_INIT_RC := android.hardware.power-service-mediatek.rc
++LOCAL_SRC_FILES := Power.cpp service.cpp
+ 
+ LOCAL_SHARED_LIBRARIES := \
+     libbase \
+@@ -22,4 +24,4 @@ ifneq ($(TARGET_POWERHAL_MODE_EXT),)
+     LOCAL_SRC_FILES += ../../../../$(TARGET_POWERHAL_MODE_EXT)
+ endif
+ 
+-include $(BUILD_SHARED_LIBRARY)
++include $(BUILD_EXECUTABLE)
+diff --git a/aidl/power-mediatek/android.hardware.power-service-mediatek.rc b/aidl/power-mediatek/android.hardware.power-service-mediatek.rc
+new file mode 100644
+index 0000000..5c8fe3d
+--- /dev/null
++++ b/aidl/power-mediatek/android.hardware.power-service-mediatek.rc
+@@ -0,0 +1,5 @@
++service vendor.power-mediatek /vendor/bin/hw/android.hardware.power-service-mediatek
++    interface aidl android.hardware.power.IPower/default
++    class hal
++    user system
++    group system
+diff --git a/aidl/power-mediatek/service.cpp b/aidl/power-mediatek/service.cpp
+new file mode 100644
+index 0000000..8f4e240
+--- /dev/null
++++ b/aidl/power-mediatek/service.cpp
+@@ -0,0 +1,24 @@
++/*
++ * SPDX-FileCopyrightText: 2024 The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <android-base/logging.h>
++#include <android/binder_manager.h>
++#include <android/binder_process.h>
++
++#include "Power.h"
++
++using aidl::android::hardware::power::impl::mediatek::Power;
++
++int main() {
++    ABinderProcess_setThreadPoolMaxThreadCount(0);
++    std::shared_ptr<Power> power = ndk::SharedRefBase::make<Power>();
++
++    const std::string instance = std::string() + Power::descriptor + "/default";
++    binder_status_t status = AServiceManager_addService(power->asBinder().get(), instance.c_str());
++    CHECK(status == STATUS_OK);
++
++    ABinderProcess_joinThreadPool();
++    return EXIT_FAILURE;  // should not reach
++}
+diff --git a/hidl/mtkpower/1.2/default/service.cpp b/hidl/mtkpower/1.2/default/service.cpp
+index 7898abc..07ca542 100644
+--- a/hidl/mtkpower/1.2/default/service.cpp
++++ b/hidl/mtkpower/1.2/default/service.cpp
+@@ -30,6 +30,9 @@ int main() {
+     sp<IMtkPower> mtkPower = new MtkPower();
+     sp<IMtkPerf> mtkPerf = new MtkPerf();
+ 
++    // Registering the @1.2 implementation also advertises @1.1 and @1.0 via
++    // its HIDL interface chain, so legacy clients (e.g. the A12 camera blob,
++    // which binds @1.0::IMtkPerf/default) resolve "default" correctly.
+     if (mtkPower->registerAsService() != android::OK) {
+         LOG(ERROR) << "Can't register MtkPower Stub HAL service";
+         return 1;
+diff --git a/hidl/mtkpower/1.2/default/vendor.mediatek.hardware.mtkpower@1.2-service.stub.rc b/hidl/mtkpower/1.2/default/vendor.mediatek.hardware.mtkpower@1.2-service.stub.rc
+index 5aae40c..091480f 100644
+--- a/hidl/mtkpower/1.2/default/vendor.mediatek.hardware.mtkpower@1.2-service.stub.rc
++++ b/hidl/mtkpower/1.2/default/vendor.mediatek.hardware.mtkpower@1.2-service.stub.rc
+@@ -2,3 +2,9 @@ service power-hal-1-2 /vendor/bin/hw/vendor.mediatek.hardware.mtkpower@1.2-servi
+     class hal
+     user system
+     group system
++    interface vendor.mediatek.hardware.mtkpower@1.0::IMtkPerf default
++    interface vendor.mediatek.hardware.mtkpower@1.0::IMtkPower default
++    interface vendor.mediatek.hardware.mtkpower@1.1::IMtkPerf default
++    interface vendor.mediatek.hardware.mtkpower@1.1::IMtkPower default
++    interface vendor.mediatek.hardware.mtkpower@1.2::IMtkPerf default
++    interface vendor.mediatek.hardware.mtkpower@1.2::IMtkPower default

@@ -1,14 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Xiaomi cannon / cannong (MT6853T) — LineageOS 21
-  所有带本地改动的仓库都指向 top-android；没改过的走 LineageOS 上游。
-  分支统一 lineage-21-cannon，方便以后和上游 merge 时区分"我的"和"他们的"。
+  Xiaomi cannon / cannong (MT6853T) — LineageOS 21 (A14)
+
+  【2026-10-31 重构】原 12 个"无上游历史 patch 快照仓"(top-android/android_*)已归档删除。
+  AOSP 侧改动改为「上游 LineageOS/AOSP + build-time 补丁」复现：
+     补丁 = repro/patches/a14_orphan/*.patch
+     应用 = scripts/apply_a14_cannon_patches.sh（build.sh 的 all/a14 流程自动调用，幂等）
+
+  因此，凡 LineageOS default.xml 已声明的 project 本文件不再覆盖（避免丢掉 build/make 的
+  <linkfile> 软链等），直接用上游；补丁在编译前叠加。涉及：
+     build/make、frameworks/base、frameworks/native、frameworks/opt/telephony、
+     packages/modules/{NetworkStack, Bluetooth}、packages/providers/MediaProvider、
+     system/core、packages/apps/Trebuchet。
+  （NetworkStack 在 A14 是 AOSP tag r67，由 default.xml 的 aosp remote 提供。）
+
+  仍保留 top-android 自有分支的（上游没有 / 有真历史 / 结构独立）：
+     device/vendor/kernel、签名 keys、packages/modules/Wifi（A14 Wifi HAL fork，未删）、
+     hardware/mediatek/wlan（上游 LineageOS 无独立仓=android_hardware_mediatek 的子目录）。
+  hardware/mediatek 与 packages/apps/Jelly：上游 LineageOS 存在但不在 default.xml，显式指上游+补丁。
 -->
 <manifest>
     <remote name="top"     fetch="ssh://git@github.com/top-android" />
     <remote name="lineage" fetch="https://github.com/LineageOS" />
 
-    <!-- ================= 自有仓库 ================= -->
+    <!-- ================= 自有仓库（top-android 分支） ================= -->
     <project path="device/xiaomi/cannon"
              name="android_device_xiaomi_cannon"
              remote="top" revision="lineage-21-cannon" />
@@ -17,97 +32,39 @@
              name="android_vendor_xiaomi_cannon"
              remote="top" revision="lineage-21-cannon" />
 
-    <!-- 默认无 KernelSU（lineage-21-cannon）——和 release 里那个 zip 的内核一致。
-         想要 KSU / SUSFS 的用户另刷 boot 变体，不改这里的默认值：
-           lineage-21-cannon  无 KSU（本 ROM 使用）
-           next               KernelSU-Next v1.1.1
-           ksu                KernelSU v0.9.5
-           next-susfs         KernelSU-Next + SUSFS
-           next-susfs-new     KernelSU-Next v3.4.2 + SUSFS v2.3.0（7 项功能）
-         四个分支的内核内容一致（都带 bpf_attr 与 DEVMAP_HASH 回填），只差 KSU/SUSFS。 -->
+    <!-- 内核默认无 KSU（lineage-21-cannon），与 release zip 一致；KSU boot 变体另刷 -->
     <project path="kernel/xiaomi/cannon"
              name="android_kernel_xiaomi_cannon"
              remote="top" revision="lineage-21-cannon" />
 
-    <!-- ================= 签名密钥（必须 private） ================= -->
-    <!-- vendor/lineage/config/common.mk:264 会 -include 这里的 keys.mk，
-         自动设置 PRODUCT_DEFAULT_DEV_CERTIFICATE 和 A14 的 CERTIFICATE_OVERRIDES。
-         不要手改 lineage_cannon.mk。
-
-         ⚠️ 2026-10-27 起整包已切到这套自签 key（ro.build.tags=dev-keys）。
-            AVB 三处 key 也指向 vendor/lineage-priv/keys/avb_release.pem。
-            换签名是不兼容变更：刷机必须整包 fastboot 刷 + -w，不能增量 OTA。 -->
+    <!-- 签名密钥（必须 private；走 SSH） -->
     <project path="vendor/lineage-priv/keys"
              name="android_vendor_lineage-priv_keys"
              remote="top" revision="main" />
 
-    <!-- ================= AOSP/Lineage 移植补丁 ================= -->
-    <!-- 这些仓库的改动都是 MTK A12 vendor 适配，不是通用 bugfix -->
-    <project path="build/make"
-             name="android_build_make"
-             remote="top" revision="lineage-21-cannon" />
-
-    <project path="frameworks/base"
-             name="android_frameworks_base"
-             remote="top" revision="lineage-21-cannon" />
-
-    <project path="frameworks/native"
-             name="android_frameworks_native"
-             remote="top" revision="lineage-21-cannon" />
-
-    <project path="frameworks/opt/telephony"
-             name="android_frameworks_opt_telephony"
-             remote="top" revision="lineage-21-cannon" />
-
-    <project path="hardware/mediatek"
-             name="android_hardware_mediatek"
-             remote="top" revision="lineage-21-cannon" />
-
-    <project path="hardware/mediatek/wlan"
-             name="android_hardware_mediatek_wlan"
-             remote="top" revision="lineage-21-cannon" />
-
-    <!-- captive portal 探测地址本地化（connect.rom.miui.com / hicloud），
-         否则国内网络下 NetworkStack 会误判「无网络」 -->
-    <project path="packages/modules/NetworkStack"
-             name="android_packages_modules_NetworkStack"
-             remote="top" revision="lineage-21-cannon" />
-
-    <!-- wifi 特性集缓存：MTK vendor HAL 的 wifi_get_supported_feature_set 缺 NULL 检查，
-         芯片上存在 ap0 时会把 HAL 打死（开热点后 WiFi 和热点一起断） -->
+    <!-- Wifi HAL fork：A14 专用修复（wifi_get_supported_feature_set NULL 检查等）；仓未删，继续用自有分支 -->
     <project path="packages/modules/Wifi"
              name="android_packages_modules_Wifi"
              remote="top" revision="lineage-21-cannon" />
 
-    <project path="packages/modules/Bluetooth"
-             name="android_packages_modules_Bluetooth"
+    <!-- wlan HAL：上游 LineageOS 无独立仓（是 android_hardware_mediatek 子目录），
+         保留自有仓 top-android/android_hardware_mediatek_wlan（2026-10-31 已恢复三分支） -->
+    <project path="hardware/mediatek/wlan"
+             name="android_hardware_mediatek_wlan"
              remote="top" revision="lineage-21-cannon" />
 
-    <project path="packages/providers/MediaProvider"
-             name="android_packages_providers_MediaProvider"
-             remote="top" revision="lineage-21-cannon" />
+    <!-- ================= 上游 LineageOS（不在 default.xml，显式声明）+ 补丁 ================= -->
+    <!-- MTK power 适配（aidl/hidl）补丁由 apply_a14 施加 -->
+    <project path="hardware/mediatek"
+             name="android_hardware_mediatek"
+             remote="lineage" revision="lineage-21" />
 
-    <project path="system/core"
-             name="android_system_core"
-             remote="top" revision="lineage-21-cannon" />
-
-    <!-- ================= 应用层补丁 ================= -->
-    <!-- Jelly: 拦掉 baiduboxapp:// 这类 App 劫持 scheme，百度移动端搜索结果不再跳出浏览器 -->
+    <!-- Jelly: 拦 baiduboxapp:// 等 scheme 劫持补丁由 apply_a14 施加 -->
     <project path="packages/apps/Jelly"
              name="android_packages_apps_Jelly"
-             remote="top" revision="lineage-21-cannon" />
-
-    <!-- Trebuchet: 最近任务底部操作栏常驻"清除全部"按钮 -->
-    <project path="packages/apps/Trebuchet"
-             name="android_packages_apps_Trebuchet"
-             remote="top" revision="lineage-21-cannon" />
+             remote="lineage" revision="lineage-21.0" />
 
     <!-- ================= 无改动，直接用上游 ================= -->
-    <!-- packages/modules/Connectivity 与 system/bpf 曾经是 fork：里面放着
-         bpfloader/netbpfload 的「critical 对象失败降级继续」和注释掉的 reboot_on_failure。
-         内核补齐 bpf_attr(4.15/4.17) + BPF_MAP_TYPE_DEVMAP_HASH(5.4) 之后，
-         4.14 上已经没有任何 critical 对象加载失败，这两个 fork 的改动全是死代码，
-         已回退成上游并从本文件移除（fork 仓库保留但不再使用）。 -->
     <project path="device/mediatek/sepolicy_vndr"
              name="android_device_mediatek_sepolicy_vndr"
              remote="lineage" revision="lineage-21" />

@@ -1,0 +1,138 @@
+diff -ruN '--exclude=.git' up/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/ChromeClient.kt orph/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/ChromeClient.kt
+--- up/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/ChromeClient.kt	2026-10-31 07:14:36.394354446 +0000
++++ orph/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/ChromeClient.kt	2026-10-31 07:14:40.626542278 +0000
+@@ -14,7 +14,9 @@
+ import android.webkit.MimeTypeMap
+ import android.webkit.ValueCallback
+ import android.webkit.WebChromeClient
++import android.webkit.WebResourceRequest
+ import android.webkit.WebView
++import android.webkit.WebViewClient
+ import android.widget.Toast
+ import org.lineageos.jelly.R
+ import org.lineageos.jelly.ui.UrlBarLayout
+@@ -83,9 +85,37 @@
+         view: WebView, isDialog: Boolean,
+         isUserGesture: Boolean, resultMsg: Message
+     ): Boolean {
+-        val result = view.hitTestResult
+-        val url = result.extra
+-        openInNewTab(activity, url, incognito)
++        // 不能用 view.hitTestResult：点到 <img>/<svg> 按钮时 extra 是图片本身的地址，
++        // 不是 window.open() 真正要打开的地址（viayoo.com 的 Android 按钮就会把
++        // 按钮的 .svg 当成新窗口地址打开）。用一个临时 WebView 接住这次导航。
++        val context = view.context
++        val tempWebView = WebView(context)
++        tempWebView.webViewClient = object : WebViewClient() {
++            private var handled = false
++
++            private fun deliver(url: String) {
++                if (handled) return
++                handled = true
++                openInNewTab(activity, url, incognito)
++            }
++
++            override fun shouldOverrideUrlLoading(
++                v: WebView, request: WebResourceRequest
++            ): Boolean {
++                deliver(request.url.toString())
++                v.post { v.destroy() }
++                return true
++            }
++
++            override fun onPageStarted(v: WebView, url: String, favicon: Bitmap?) {
++                deliver(url)
++                v.stopLoading()
++                v.post { v.destroy() }
++            }
++        }
++        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
++        transport.webView = tempWebView
++        resultMsg.sendToTarget()
+         return true
+     }
+ }
+diff -ruN '--exclude=.git' up/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/WebClient.kt orph/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/WebClient.kt
+--- up/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/WebClient.kt	2026-10-31 07:14:36.394354446 +0000
++++ orph/android_packages_apps_Jelly/app/src/main/java/org/lineageos/jelly/webview/WebClient.kt	2026-10-31 07:14:40.626542278 +0000
+@@ -35,8 +35,30 @@
+ import org.lineageos.jelly.utils.IntentUtils
+ import org.lineageos.jelly.utils.UrlUtils
+ import java.net.URISyntaxException
++import java.util.Locale
+ 
+ internal class WebClient(private val urlBarLayout: UrlBarLayout) : WebViewClient() {
++    companion object {
++        /**
++         * 只允许这些 scheme 留在 WebView 里正常加载。
++         */
++        private val WEB_SCHEMES = setOf(
++                "http", "https", "content", "file", "chrome",
++                "about", "data", "javascript", "inline",
++        )
++
++        /**
++         * 只允许这几个 scheme 交给系统处理（打电话/短信/邮件/应用商店/地图）。
++         *
++         * 其余一律拦在浏览器内。典型例子是百度移动端搜索结果页，它会主动把
++         * location 设成 baiduboxapp://v1/browser/open?...，交给系统就直接切走
++         * 浏览器，搜索没法继续。行为和 Via 这类 WebView 浏览器一致。
++         */
++        private val ALLOWED_EXTERNAL_SCHEMES = setOf(
++                "tel", "mailto", "sms", "smsto", "mms", "market", "geo",
++        )
++    }
++
+     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+         super.onPageStarted(view, url, favicon)
+         urlBarLayout.onPageLoadStarted(url)
+@@ -53,9 +75,16 @@
+     }
+ 
+     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
++        val url = request.url.toString()
++
++        // 注意：这个判断必须在 isForMainFrame 之外。百度那类页面是在隐藏的 iframe
++        // 里发起 App scheme 跳转的，子框架导航同样要拦。
++        if (shouldBlockNavigation(url)) {
++            return true
++        }
++
+         if (request.isForMainFrame) {
+             val webViewExt = view as WebViewExt
+-            val url = request.url.toString()
+             val needsLookup = (request.hasGesture()
+                     || !TextUtils.equals(url, webViewExt.lastLoadedUrl))
+             if (!webViewExt.isIncognito
+@@ -101,6 +130,31 @@
+             .show()
+     }
+ 
++    /**
++     * 判断这次导航要不要拦下来（拦 = 页面原地不动，什么也不发生）。
++     *
++     * Web scheme 放行；白名单里的外抛 scheme 放行；intent:// 要看它内层 scheme；
++     * 其余全部拦掉。
++     */
++    private fun shouldBlockNavigation(url: String): Boolean {
++        val scheme = runCatching { Uri.parse(url).scheme }.getOrNull()
++                ?.lowercase(Locale.getDefault()) ?: return false
++        if (WEB_SCHEMES.contains(scheme)) {
++            return false
++        }
++        if (ALLOWED_EXTERNAL_SCHEMES.contains(scheme)) {
++            return false
++        }
++        if (scheme == "intent") {
++            val inner = runCatching {
++                Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
++            }.getOrNull()
++            val innerScheme = inner?.data?.scheme?.lowercase(Locale.getDefault())
++            return innerScheme == null || !ALLOWED_EXTERNAL_SCHEMES.contains(innerScheme)
++        }
++        return true
++    }
++
+     private fun startActivityForUrl(view: WebView, url: String): Boolean {
+         val context = view.context
+         var intent = try {
