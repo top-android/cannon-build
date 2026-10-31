@@ -13,7 +13,7 @@
 # 用法：
 #   bash scripts/export_a16_dirty_patches.sh [/cannon/rom-a16]
 #
-# 说明：pairs 列表严格对应 apply_a16_cannon_patches.sh 的 MAP（A16 首轮 20 个 project）。
+# 说明：pairs 列表严格对应 apply_a16_cannon_patches.sh 的 MAP（A16 21 个 project，含 art=A16-D8）。
 #       新增/删除 project 时两处同步改。
 #
 set -u
@@ -23,7 +23,7 @@ DST="$HERE/../repro/patches/a16"
 mkdir -p "$DST"
 
 pairs=(
-"build/make:build_make" "build/soong:build_soong" "device/xiaomi/cannon:device_xiaomi_cannon"
+"art:art" "build/make:build_make" "build/soong:build_soong" "device/xiaomi/cannon:device_xiaomi_cannon"
 "frameworks/base:frameworks_base" "frameworks/native:frameworks_native"
 "frameworks/opt/net/wifi:frameworks_opt_net_wifi" "frameworks/opt/telephony:frameworks_opt_telephony"
 "hardware/lineage/compat:hardware_lineage_compat" "hardware/mediatek:hardware_mediatek"

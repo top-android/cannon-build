@@ -14,9 +14,9 @@
 #   - 含二进制占位的新增文件不 git apply，转为提示再生。
 #
 # 说明（A16 与 A15 的仓集差异）：
-#   A16 首轮 dirty 20 仓；相比 A15 少了 Trebuchet、vendor/xiaomi/cannon、kernel/xiaomi/cannon
+#   A16 dirty 21 仓（含 art/tools/hiddenapi=A16-D8）；相比 A15 少了 Trebuchet、vendor/xiaomi/cannon、kernel/xiaomi/cannon
 #   （这三个 A16 首轮工作树干净/未改），多了 frameworks/opt/net/wifi（A16 单独改了）。
-#   本 MAP 严格对应 /cannon/rom-a16 现存的 20 个 project。
+#   本 MAP 严格对应 /cannon/rom-a16 现存的 21 个 project（含 art）。
 #
 # 用法：
 #   bash scripts/apply_a16_cannon_patches.sh [/cannon/rom-a16]
@@ -41,6 +41,7 @@ if [ ! -d "$PATCHDIR" ]; then echo "!! 补丁目录不存在: $PATCHDIR"; exit 2
 
 # 补丁文件名 -> 仓库相对路径（严格对应 A16 导出脚本 / export_a16 的 pairs）
 MAP=(
+  "art.patch:art"
   "build_make.patch:build/make"
   "build_soong.patch:build/soong"
   "device_xiaomi_cannon.patch:device/xiaomi/cannon"

@@ -245,7 +245,7 @@ boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / v
 
 - [ ] **A16（LineageOS 23.2 / Android 16）适配**（进行中，用 `./build.sh a16`）
   构建配置已就绪：`lineage-23.2` + `cannon-23.2.xml` + 三参 lunch（`lineage_cannon bp4a userdebug`）
-  + `apply_a16_cannon_patches.sh`（`repro/patches/a16/`，20 仓补丁，幂等重放；
+  + `apply_a16_cannon_patches.sh`（`repro/patches/a16/`，21 仓补丁，幂等重放；
   由 `scripts/export_a16_dirty_patches.sh` 从源码树导出，tracked diff + untracked 新源码均为合法可 apply 的 diff）。
   首轮已撞 soong 严格化漂移（详见本仓 docs/A16_FIX_PLAYBOOK.md 之 A16-D1/D2）：
   init.mt6853.usb.rc 多 namespace 撞名、lib_driver_cmd_mt66xx 缺 Android.bp、
