@@ -76,3 +76,16 @@ index b189e78..103eb1a 100644
      src: "etc/init.mt6853.usb.rc",
      sub_dir: "init/hw",
      vendor: true,
+diff --git a/sepolicy/vendor/file_contexts b/sepolicy/vendor/file_contexts
+index cf2dcf8..9e5ee0d 100644
+--- a/sepolicy/vendor/file_contexts
++++ b/sepolicy/vendor/file_contexts
+@@ -16,8 +16,6 @@
+ /vendor/bin/hw/android\.hardware\.biometrics\.fingerprint@2\.3-service\.xiaomi u:object_r:hal_fingerprint_default_exec:s0
+ 
+ # NFC
+-/dev/nq-nci                                                    u:object_r:nfc_device:s0
+-/dev/p73                                                       u:object_r:nfc_device:s0
+ /vendor/bin/hw/vendor\.nxp\.hardware\.nfc@1\.2-service         u:object_r:hal_nfc_default_exec:s0
+ 
+ # Lights
