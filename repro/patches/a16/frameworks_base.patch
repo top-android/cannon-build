@@ -1,0 +1,128 @@
+diff --git a/core/java/android/os/storage/StorageManager.java b/core/java/android/os/storage/StorageManager.java
+index e2ef800b5..6ffe9a4d2 100644
+--- a/core/java/android/os/storage/StorageManager.java
++++ b/core/java/android/os/storage/StorageManager.java
+@@ -1700,6 +1700,16 @@ public class StorageManager {
+         return RoSystemProperties.CRYPTO_ENCRYPTED;
+     }
+ 
++    /**
++     * cannon A15 老 vendor 适配：A15 删除了 StorageManager.inCryptKeeperBounce()，
++     * 而 A12 prebuilt com.mediatek.ims（WifiPdnHandler）仍静态调用它。该状态在新平台已不存在，
++     * 恒返回 false = 「不在 bounce 窗口、存储可用」，正常语义即正确。必须 @hide（prebuilt 运行期兼容）。
++     * @hide
++     */
++    public static boolean inCryptKeeperBounce() {
++        return false;
++    }
++
+     /**
+      * @hide
+      * Does this device have file-based encryption (FBE) enabled?
+diff --git a/services/core/java/com/android/server/DockObserver.java b/services/core/java/com/android/server/DockObserver.java
+index d2db8f74c..4c2dd8dee 100644
+--- a/services/core/java/com/android/server/DockObserver.java
++++ b/services/core/java/com/android/server/DockObserver.java
+@@ -337,7 +337,10 @@ final class DockObserver extends SystemService {
+                     }
+                 }
+ 
+-                if (whichSound != null) {
++                // cannon: system_server MediaPlayer via Ringtone leaks and finalize() blocks on
++                // the A12-vendor media stack => kills system_server (same switch as SoundEffectsHelper).
++                if (whichSound != null && !android.os.SystemProperties.getBoolean(
++                        "persist.sys.cannon.skip_sfx_mediaplayer", true)) {
+                     final String soundPath = Settings.Global.getString(cr, whichSound);
+                     if (soundPath != null) {
+                         final Uri soundUri = Uri.parse("file://" + soundPath);
+diff --git a/services/core/java/com/android/server/StorageManagerService.java b/services/core/java/com/android/server/StorageManagerService.java
+index 81e70659f..00807dbdc 100644
+--- a/services/core/java/com/android/server/StorageManagerService.java
++++ b/services/core/java/com/android/server/StorageManagerService.java
+@@ -1005,6 +1005,17 @@ class StorageManagerService extends IStorageManager.Stub
+     }
+ 
+     private boolean isHevcDecoderSupported() {
++        // cannon: A14 system libs + A12 vendor media stack => MediaCodecList.getCodecCount()
++        // blocks forever inside BpMediaPlayerService::getCodecList (verified with kill -3:
++        // the StorageManagerService handler thread is parked in
++        // IPCThreadState::waitForResponse).  Because this runs inside handleSystemReady(),
++        // the whole handler thread stalls => H_DAEMON_CONNECTED / H_BOOT_COMPLETED /
++        // H_VOLUME_MOUNT are never processed => no emulated volume => /storage/emulated is
++        // empty, so DocumentsUI spins on "Failed to find root .../root/primary".
++        // Transcoding is meaningless on this port, so skip the probe entirely.
++        if (SystemProperties.getBoolean("persist.sys.cannon.skip_hevc_probe", true)) {
++            return false;
++        }
+         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+         MediaCodecInfo[] codecInfos = codecList.getCodecInfos();
+         for (MediaCodecInfo codecInfo : codecInfos) {
+diff --git a/services/core/java/com/android/server/audio/SoundEffectsHelper.java b/services/core/java/com/android/server/audio/SoundEffectsHelper.java
+index 8c4efbae0..04051232e 100644
+--- a/services/core/java/com/android/server/audio/SoundEffectsHelper.java
++++ b/services/core/java/com/android/server/audio/SoundEffectsHelper.java
+@@ -270,6 +270,17 @@ class SoundEffectsHelper {
+         if (mSoundPool != null && res.mSampleId != EFFECT_NOT_IN_SOUND_POOL && res.mLoaded) {
+             mSoundPool.play(res.mSampleId, volFloat, volFloat, 0, 0, 1.0f);
+         } else {
++            // cannon: A15 system libs + A12 vendor media stack => MediaPlayerService calls
++            // park forever (see StorageManagerService.isHevcDecoderSupported and its note on
++            // BpMediaPlayerService::getCodecList blocking). MediaPlayer.native_finalize() then
++            // blocks for 10s on GC => FinalizerWatchdogDaemon SIGKILLs system_server => bootloop.
++            // System effect sounds are non-essential, so skip the MediaPlayer fallback by default
++            // (set persist.sys.cannon.skip_sfx_mediaplayer=false to restore upstream behavior).
++            if (android.os.SystemProperties.getBoolean("persist.sys.cannon.skip_sfx_mediaplayer", true)) {
++                Log.w(TAG, "skip system sound effect " + mEffects[effect]
++                        + " (MediaPlayer fallback disabled: cannon old-vendor media stack)");
++                return;
++            }
+             MediaPlayer mediaPlayer = new MediaPlayer();
+             try {
+                 String filePath = getResourceFilePath(res);
+diff --git a/services/core/java/com/android/server/power/Notifier.java b/services/core/java/com/android/server/power/Notifier.java
+index 44b438bfc..5b5a71562 100644
+--- a/services/core/java/com/android/server/power/Notifier.java
++++ b/services/core/java/com/android/server/power/Notifier.java
+@@ -1198,6 +1198,17 @@ public class Notifier {
+             }
+ 
+             // play sound
++            // cannon: a system_server MediaPlayer (created via Ringtone below) leaks and its
++            // finalize() blocks 10s on the broken A12-vendor media stack => FinalizerWatchdogDaemon
++            // SIGKILLs system_server => boot loop. Skip system sounds by default (same switch as
++            // SoundEffectsHelper). Set persist.sys.cannon.skip_sfx_mediaplayer=false to restore.
++            if (android.os.SystemProperties.getBoolean(
++                    "persist.sys.cannon.skip_sfx_mediaplayer", true)) {
++                Slog.w(TAG, "skip charging-started sound (system MediaPlayer disabled: cannon"
++                        + " old-vendor media stack)");
++                mIsPlayingChargingStartedFeedback.set(false);
++                return;
++            }
+             final String soundPath = Settings.Global.getString(mContext.getContentResolver(),
+                     wireless ? Settings.Global.WIRELESS_CHARGING_STARTED_SOUND
+                             : Settings.Global.CHARGING_STARTED_SOUND);
+diff --git a/telephony/java/android/telephony/SubscriptionManager.java b/telephony/java/android/telephony/SubscriptionManager.java
+index 8b926fadb..d7cda8a33 100644
+--- a/telephony/java/android/telephony/SubscriptionManager.java
++++ b/telephony/java/android/telephony/SubscriptionManager.java
+@@ -4957,4 +4957,20 @@ public class SubscriptionManager {
+             throw ex.rethrowFromSystemServer();
+         }
+     }
++
++    /**
++     * A12 兼容垫片（cannon A15 old-vendor）：
++     * A15 删除了 SubscriptionManager.getSimStateForSlotIndex(int) 静态方法，
++     * 但原厂 prebuilt com.mediatek.ims（ImsConfigEventReceiver）仍在静态调用它，
++     * 缺失时 NoSuchMethodError 崩溃 → IMS 挂 → VoLTE 通话/短信失效。
++     * 直接委托给 TelephonyManager 里同名 public static 实现（语义一致）。
++     * 注意：必须 @hide —— 这是给 prebuilt ims 运行时用的兼容垫片，不属于公开
++     * API 面；否则 check_current_api 会因新增 public API 未登记而构建失败。
++     * @hide
++     * @removed
++     */
++    @Deprecated
++    public static int getSimStateForSlotIndex(int slotIndex) {
++        return TelephonyManager.getSimStateForSlotIndex(slotIndex);
++    }
+ }

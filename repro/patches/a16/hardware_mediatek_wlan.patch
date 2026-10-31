@@ -1,0 +1,1330 @@
+diff --git a/wifi_hal/Android.bp b/wifi_hal/Android.bp
+index 4fdb2eb..79aad65 100644
+--- a/wifi_hal/Android.bp
++++ b/wifi_hal/Android.bp
+@@ -23,6 +23,9 @@ cc_library_static {
+         "external/libnl/include",
+         "external/wpa_supplicant_8/src/drivers",
+         "hardware/libhardware_legacy/include/hardware_legacy",
++        // A15: wifi_hal.h + gscan/wifi_logger/wifi_offload 等 legacy 头已从
++        // libhardware_legacy 迁到 hardware/interfaces/wifi/legacy_headers（cannon A15 适配）
++        "hardware/interfaces/wifi/legacy_headers/include/hardware_legacy",
+     ],
+     shared_libs: [
+         "libutils",
+diff --git a/wifi_hal/wifi_logger.cpp b/wifi_hal/wifi_logger.cpp
+index 9ecf76a..bccd463 100644
+--- a/wifi_hal/wifi_logger.cpp
++++ b/wifi_hal/wifi_logger.cpp
+@@ -13,8 +13,8 @@
+ #include <netlink/object-api.h>
+ #include <netlink/netlink.h>
+ #include <netlink/socket.h>
+-#include <netlink-private/object-api.h>
+-#include <netlink-private/types.h>
++// A15: external/libnl 升到 25Q1 后删除了私有头目录；
++// 本文件未使用任何 netlink 私有符号（已核），冗余 include 移除（cannon A15 适配）。
+ 
+ #include "nl80211_copy.h"
+ #include "sync.h"
+diff --git a/wpa_supplicant_8_lib/Android.mk b/wpa_supplicant_8_lib/Android.mk
+index 863426b..24f8aa8 100644
+--- a/wpa_supplicant_8_lib/Android.mk
++++ b/wpa_supplicant_8_lib/Android.mk
+@@ -60,7 +60,9 @@ endif
+ ########################
+ include $(CLEAR_VARS)
+ LOCAL_SANITIZE := cfi
+-LOCAL_MODULE := lib_driver_cmd_mt66xx
++# A15: 静态库改由同级 Android.bp 的 cc_library_static 提供（soong 看不到 .mk）；
++# 这里同名模块改名 -legacy 以免与 soong 模块重名冲突（同 wifi_hal 步 15 做法）。
++LOCAL_MODULE := lib_driver_cmd_mt66xx-legacy
+ LOCAL_PROPRIETARY_MODULE := true
+ LOCAL_MODULE_OWNER := mtk
+ LOCAL_SHARED_LIBRARIES := libc libcutils
+diff --git a/libwifi-hal-wrapper/Android.bp b/libwifi-hal-wrapper/Android.bp
+new file mode 100644
+index 0000000..bca345f
+--- /dev/null
++++ b/libwifi-hal-wrapper/Android.bp
+@@ -0,0 +1,36 @@
++//
++// SPDX-FileCopyrightText: 2024 The LineageOS Project
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++
++cc_library_shared {
++    name: "libwifi-hal-wrapper",
++    vendor: true,
++    required: [
++        "libwifi-hal-wrapper.xml",
++    ],
++    srcs: [
++        "libwifi-hal.cpp",
++    ],
++    shared_libs: [
++        "libcutils",
++        "libutils",
++        "liblog",
++        "wifi_legacy",
++    ],
++    cflags: select(soong_config_variable("mediatek_wifi_hal", "use_pre_u_qpr2_struct"), {
++        true: ["-DUSE_PRE_U_QPR2_STRUCT"],
++        default: [],
++    }) + select(soong_config_variable("mediatek_wifi_hal", "use_pre_baklava_qpr0_struct"), {
++        true: ["-DUSE_PRE_BAKLAVA_QPR0_STRUCT"],
++        default: [],
++    }),
++}
++
++prebuilt_etc {
++    name: "libwifi-hal-wrapper.xml",
++    src: "libwifi-hal-wrapper.xml",
++    relative_install_path: "wifi/vendor_hals",
++    vendor: true,
++}
+diff --git a/libwifi-hal-wrapper/libwifi-hal-wrapper.xml b/libwifi-hal-wrapper/libwifi-hal-wrapper.xml
+new file mode 100644
+index 0000000..7219f07
+--- /dev/null
++++ b/libwifi-hal-wrapper/libwifi-hal-wrapper.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<WifiVendorHal version="1">
++ <path>/vendor/lib64/libwifi-hal-wrapper.so</path>
++ <primary>1</primary>
++</WifiVendorHal>
+diff --git a/libwifi-hal-wrapper/libwifi-hal.cpp b/libwifi-hal-wrapper/libwifi-hal.cpp
+new file mode 100644
+index 0000000..0fba82e
+--- /dev/null
++++ b/libwifi-hal-wrapper/libwifi-hal.cpp
+@@ -0,0 +1,228 @@
++/*
++ * SPDX-FileCopyrightText: 2024 The LineageOS Project
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#define LOG_TAG "libwifi-hal-wrapper"
++
++#include <dlfcn.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#include <log/log.h>
++
++#include "wifi_hal_legacy.h"
++
++#define WIFI_HAL_LIB_NAME "libwifi-hal-mtk.so"
++#define WIFI_HAL_INIT_FUNC_NAME "init_wifi_vendor_hal_func_table"
++
++#define SET_IF_NOT_NULL(fn_ptr, fln_ptr, member)  \
++    do {                                          \
++        if ((fln_ptr) && (fln_ptr)->member) {     \
++            (fn_ptr)->member = (fln_ptr)->member; \
++        }                                         \
++    } while (0)
++
++static wifi_hal_legacy_fn* fln = nullptr;
++static void* lib_handle = nullptr;
++
++wifi_error init_wifi_vendor_hal_func_table(wifi_hal_fn* fn) {
++    init_wifi_vendor_hal_func_table_legacy_t init_fn;
++    wifi_error ret = WIFI_ERROR_NONE;
++
++    fln = (wifi_hal_legacy_fn*)calloc(1, sizeof(wifi_hal_legacy_fn));
++    if (!fln) {
++        ret = WIFI_ERROR_OUT_OF_MEMORY;
++        goto out;
++    }
++
++    lib_handle = dlopen(WIFI_HAL_LIB_NAME, RTLD_LAZY);
++    if (!lib_handle) {
++        ALOGE("Failed to open vendor library %s.", WIFI_HAL_LIB_NAME);
++        ret = WIFI_ERROR_UNKNOWN;
++        goto error;
++    }
++
++    init_fn = (init_wifi_vendor_hal_func_table_legacy_t)dlsym(lib_handle, WIFI_HAL_INIT_FUNC_NAME);
++    if (!init_fn) {
++        ALOGE("Failed to locate vendor HAL init function.");
++        ret = WIFI_ERROR_UNKNOWN;
++        goto error;
++    }
++
++    ret = init_fn(fln);
++    if (ret != WIFI_ERROR_NONE) {
++        ALOGE("Vendor HAL init function returns %d.", ret);
++        goto error;
++    }
++
++    SET_IF_NOT_NULL(fn, fln, wifi_initialize);
++    SET_IF_NOT_NULL(fn, fln, wifi_wait_for_driver_ready);
++    SET_IF_NOT_NULL(fn, fln, wifi_cleanup);
++    SET_IF_NOT_NULL(fn, fln, wifi_event_loop);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_error_info);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_supported_feature_set);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_concurrency_matrix);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_scanning_mac_oui);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_supported_channels);
++    SET_IF_NOT_NULL(fn, fln, wifi_is_epr_supported);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_ifaces);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_iface_name);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_iface_event_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_iface_event_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_start_gscan);
++    SET_IF_NOT_NULL(fn, fln, wifi_stop_gscan);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_cached_gscan_results);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_bssid_hotlist);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_bssid_hotlist);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_significant_change_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_significant_change_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_gscan_capabilities);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_link_stats);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_link_stats);
++    SET_IF_NOT_NULL(fn, fln, wifi_clear_link_stats);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_valid_channels);
++    SET_IF_NOT_NULL(fn, fln, wifi_rtt_range_request);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    SET_IF_NOT_NULL(fn, fln, wifi_rtt_range_request_v3);
++#ifndef USE_PRE_BAKLAVA_QPR0_STRUCT
++    SET_IF_NOT_NULL(fn, fln, wifi_rtt_range_request_v4);
++#endif
++#endif
++    SET_IF_NOT_NULL(fn, fln, wifi_rtt_range_cancel);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_rtt_capabilities);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    SET_IF_NOT_NULL(fn, fln, wifi_get_rtt_capabilities_v3);
++#ifndef USE_PRE_BAKLAVA_QPR0_STRUCT
++    SET_IF_NOT_NULL(fn, fln, wifi_get_rtt_capabilities_v4);
++#endif
++#endif
++    SET_IF_NOT_NULL(fn, fln, wifi_rtt_get_responder_info);
++    SET_IF_NOT_NULL(fn, fln, wifi_enable_responder);
++    SET_IF_NOT_NULL(fn, fln, wifi_disable_responder);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_nodfs_flag);
++    SET_IF_NOT_NULL(fn, fln, wifi_start_logging);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_epno_list);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_epno_list);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_country_code);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_firmware_memory_dump);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_log_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_log_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_alert_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_alert_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_firmware_version);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_ring_buffers_status);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_logger_supported_feature_set);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_ring_data);
++    SET_IF_NOT_NULL(fn, fln, wifi_enable_tdls);
++    SET_IF_NOT_NULL(fn, fln, wifi_disable_tdls);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_tdls_status);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_tdls_capabilities);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_driver_version);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_passpoint_list);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_passpoint_list);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_lci);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_lcr);
++    SET_IF_NOT_NULL(fn, fln, wifi_start_sending_offloaded_packet);
++    SET_IF_NOT_NULL(fn, fln, wifi_stop_sending_offloaded_packet);
++    SET_IF_NOT_NULL(fn, fln, wifi_start_rssi_monitoring);
++    SET_IF_NOT_NULL(fn, fln, wifi_stop_rssi_monitoring);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_wake_reason_stats);
++    SET_IF_NOT_NULL(fn, fln, wifi_configure_nd_offload);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_driver_memory_dump);
++    SET_IF_NOT_NULL(fn, fln, wifi_start_pkt_fate_monitoring);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_tx_pkt_fates);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_rx_pkt_fates);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_enable_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_disable_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_publish_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_publish_cancel_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_subscribe_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_subscribe_cancel_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_transmit_followup_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_stats_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_config_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_tca_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_beacon_sdf_payload_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_register_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_get_version);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_get_capabilities);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_data_interface_create);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_data_interface_delete);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_data_request_initiator);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_data_indication_response);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_data_end);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_packet_filter_capabilities);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_packet_filter);
++    SET_IF_NOT_NULL(fn, fln, wifi_read_packet_filter);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_roaming_capabilities);
++    SET_IF_NOT_NULL(fn, fln, wifi_enable_firmware_roaming);
++    SET_IF_NOT_NULL(fn, fln, wifi_configure_roaming);
++    SET_IF_NOT_NULL(fn, fln, wifi_select_tx_power_scenario);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_tx_power_scenario);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_radio_mode_change_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_latency_mode);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_thermal_mitigation_mode);
++    SET_IF_NOT_NULL(fn, fln, wifi_virtual_interface_create);
++    SET_IF_NOT_NULL(fn, fln, wifi_virtual_interface_delete);
++    SET_IF_NOT_NULL(fn, fln, wifi_map_dscp_access_category);
++    SET_IF_NOT_NULL(fn, fln, wifi_reset_dscp_mapping);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_subsystem_restart_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_supported_iface_name);
++    SET_IF_NOT_NULL(fn, fln, wifi_early_initialize);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_chip_feature_set);
++    SET_IF_NOT_NULL(fn, fln, wifi_multi_sta_set_primary_connection);
++    SET_IF_NOT_NULL(fn, fln, wifi_multi_sta_set_use_case);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_coex_unsafe_channels);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_voip_mode);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_get_capabilities);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_register_events);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_session_setup);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_session_update);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_session_suspend);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_session_resume);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_session_teardown);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_session_get_stats);
++#endif
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_register_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_get_capability);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_setup_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_teardown_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_info_frame_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_get_stats);
++    SET_IF_NOT_NULL(fn, fln, wifi_twt_clear_stats);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_dtim_config);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_usable_channels);
++    SET_IF_NOT_NULL(fn, fln, wifi_trigger_subsystem_restart);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_indoor_state);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_supported_radio_combinations_matrix);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_rtt_chre_enable_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_rtt_chre_disable_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_chre_register_handler);
++    SET_IF_NOT_NULL(fn, fln, wifi_enable_tx_power_limits);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_cached_scan_results);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_chip_capabilities);
++    SET_IF_NOT_NULL(fn, fln, wifi_get_supported_iface_concurrency_matrix);
++    SET_IF_NOT_NULL(fn, fln, wifi_enable_sta_channel_for_peer_network);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_suspend_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_resume_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_pairing_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_pairing_indication_response);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_bootstrapping_request);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_bootstrapping_indication_response);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_scan_mode);
++    SET_IF_NOT_NULL(fn, fln, wifi_nan_pairing_end);
++    SET_IF_NOT_NULL(fn, fln, wifi_set_mlo_mode);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    SET_IF_NOT_NULL(fn, fln, wifi_virtual_interface_create_with_vendor_data);
++#endif
++
++out:
++    return ret;
++error:
++    free(fln);
++    if (lib_handle) dlclose(lib_handle);
++    return ret;
++}
+diff --git a/libwifi-hal-wrapper/wifi_hal_legacy.h b/libwifi-hal-wrapper/wifi_hal_legacy.h
+new file mode 100644
+index 0000000..e798f39
+--- /dev/null
++++ b/libwifi-hal-wrapper/wifi_hal_legacy.h
+@@ -0,0 +1,626 @@
++/*
++ * SPDX-FileCopyrightText: 2016 The Android Open Source Project
++ * SPDX-FileCopyrightText: 2024 The LineageOS Project
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#pragma once
++
++#include <hardware_legacy/wifi_hal.h>
++
++// wifi HAL function pointer table
++typedef struct {
++    wifi_error (*wifi_initialize)(wifi_handle*);
++    wifi_error (*wifi_wait_for_driver_ready)(void);
++    void (*wifi_cleanup)(wifi_handle, wifi_cleaned_up_handler);
++    void (*wifi_event_loop)(wifi_handle);
++    void (*wifi_get_error_info)(wifi_error, const char**);
++    wifi_error (*wifi_get_supported_feature_set)(wifi_interface_handle, feature_set*);
++    wifi_error (*wifi_get_concurrency_matrix)(wifi_interface_handle, int, feature_set*, int*);
++    wifi_error (*wifi_set_scanning_mac_oui)(wifi_interface_handle, unsigned char*);
++    wifi_error (*wifi_get_supported_channels)(wifi_handle, int*, wifi_channel*);
++    wifi_error (*wifi_is_epr_supported)(wifi_handle);
++    wifi_error (*wifi_get_ifaces)(wifi_handle, int*, wifi_interface_handle**);
++    wifi_error (*wifi_get_iface_name)(wifi_interface_handle, char* name, size_t);
++    wifi_error (*wifi_set_iface_event_handler)(wifi_request_id, wifi_interface_handle,
++                                               wifi_event_handler);
++    wifi_error (*wifi_reset_iface_event_handler)(wifi_request_id, wifi_interface_handle);
++    wifi_error (*wifi_start_gscan)(wifi_request_id, wifi_interface_handle, wifi_scan_cmd_params,
++                                   wifi_scan_result_handler);
++    wifi_error (*wifi_stop_gscan)(wifi_request_id, wifi_interface_handle);
++    wifi_error (*wifi_get_cached_gscan_results)(wifi_interface_handle, byte, int,
++                                                wifi_cached_scan_results*, int*);
++    wifi_error (*wifi_set_bssid_hotlist)(wifi_request_id, wifi_interface_handle,
++                                         wifi_bssid_hotlist_params, wifi_hotlist_ap_found_handler);
++    wifi_error (*wifi_reset_bssid_hotlist)(wifi_request_id, wifi_interface_handle);
++    wifi_error (*wifi_set_significant_change_handler)(wifi_request_id, wifi_interface_handle,
++                                                      wifi_significant_change_params,
++                                                      wifi_significant_change_handler);
++    wifi_error (*wifi_reset_significant_change_handler)(wifi_request_id, wifi_interface_handle);
++    wifi_error (*wifi_get_gscan_capabilities)(wifi_interface_handle, wifi_gscan_capabilities*);
++    wifi_error (*wifi_set_link_stats)(wifi_interface_handle, wifi_link_layer_params);
++    wifi_error (*wifi_get_link_stats)(wifi_request_id, wifi_interface_handle,
++                                      wifi_stats_result_handler);
++    wifi_error (*wifi_clear_link_stats)(wifi_interface_handle, u32, u32*, u8, u8*);
++    wifi_error (*wifi_get_valid_channels)(wifi_interface_handle, int, int, wifi_channel*, int*);
++    wifi_error (*wifi_rtt_range_request)(wifi_request_id, wifi_interface_handle, unsigned,
++                                         wifi_rtt_config[], wifi_rtt_event_handler);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    wifi_error (*wifi_rtt_range_request_v3)(wifi_request_id, wifi_interface_handle, unsigned,
++                                            wifi_rtt_config_v3[], wifi_rtt_event_handler_v3);
++#ifndef USE_PRE_BAKLAVA_QPR0_STRUCT
++    wifi_error (*wifi_rtt_range_request_v4)(wifi_request_id, wifi_interface_handle, unsigned,
++                                            wifi_rtt_config_v4[], wifi_rtt_event_handler_v4);
++#endif
++#endif
++    wifi_error (*wifi_rtt_range_cancel)(wifi_request_id, wifi_interface_handle, unsigned,
++                                        mac_addr[]);
++    wifi_error (*wifi_get_rtt_capabilities)(wifi_interface_handle, wifi_rtt_capabilities*);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    wifi_error (*wifi_get_rtt_capabilities_v3)(wifi_interface_handle, wifi_rtt_capabilities_v3*);
++#ifndef USE_PRE_BAKLAVA_QPR0_STRUCT
++    wifi_error (*wifi_get_rtt_capabilities_v4)(wifi_interface_handle, wifi_rtt_capabilities_v4*);
++#endif
++#endif
++    wifi_error (*wifi_rtt_get_responder_info)(wifi_interface_handle iface,
++                                              wifi_rtt_responder* responder_info);
++    wifi_error (*wifi_enable_responder)(wifi_request_id id, wifi_interface_handle iface,
++                                        wifi_channel_info channel_hint,
++                                        unsigned max_duration_seconds,
++                                        wifi_rtt_responder* responder_info);
++    wifi_error (*wifi_disable_responder)(wifi_request_id id, wifi_interface_handle iface);
++    wifi_error (*wifi_set_nodfs_flag)(wifi_interface_handle, u32);
++    wifi_error (*wifi_start_logging)(wifi_interface_handle, u32, u32, u32, u32, char*);
++    wifi_error (*wifi_set_epno_list)(wifi_request_id, wifi_interface_handle,
++                                     const wifi_epno_params*, wifi_epno_handler);
++    wifi_error (*wifi_reset_epno_list)(wifi_request_id, wifi_interface_handle);
++    wifi_error (*wifi_set_country_code)(wifi_interface_handle, const char*);
++    wifi_error (*wifi_get_firmware_memory_dump)(wifi_interface_handle iface,
++                                                wifi_firmware_memory_dump_handler handler);
++    wifi_error (*wifi_set_log_handler)(wifi_request_id id, wifi_interface_handle iface,
++                                       wifi_ring_buffer_data_handler handler);
++    wifi_error (*wifi_reset_log_handler)(wifi_request_id id, wifi_interface_handle iface);
++    wifi_error (*wifi_set_alert_handler)(wifi_request_id id, wifi_interface_handle iface,
++                                         wifi_alert_handler handler);
++    wifi_error (*wifi_reset_alert_handler)(wifi_request_id id, wifi_interface_handle iface);
++    wifi_error (*wifi_get_firmware_version)(wifi_interface_handle iface, char* buffer,
++                                            int buffer_size);
++    wifi_error (*wifi_get_ring_buffers_status)(wifi_interface_handle iface, u32* num_rings,
++                                               wifi_ring_buffer_status* status);
++    wifi_error (*wifi_get_logger_supported_feature_set)(wifi_interface_handle iface,
++                                                        unsigned int* support);
++    wifi_error (*wifi_get_ring_data)(wifi_interface_handle iface, char* ring_name);
++    wifi_error (*wifi_enable_tdls)(wifi_interface_handle, mac_addr, wifi_tdls_params*,
++                                   wifi_tdls_handler);
++    wifi_error (*wifi_disable_tdls)(wifi_interface_handle, mac_addr);
++    wifi_error (*wifi_get_tdls_status)(wifi_interface_handle, mac_addr, wifi_tdls_status*);
++    wifi_error (*wifi_get_tdls_capabilities)(wifi_interface_handle iface,
++                                             wifi_tdls_capabilities* capabilities);
++    wifi_error (*wifi_get_driver_version)(wifi_interface_handle iface, char* buffer,
++                                          int buffer_size);
++    wifi_error (*wifi_set_passpoint_list)(wifi_request_id id, wifi_interface_handle iface, int num,
++                                          wifi_passpoint_network* networks,
++                                          wifi_passpoint_event_handler handler);
++    wifi_error (*wifi_reset_passpoint_list)(wifi_request_id id, wifi_interface_handle iface);
++    wifi_error (*wifi_set_lci)(wifi_request_id id, wifi_interface_handle iface,
++                               wifi_lci_information* lci);
++    wifi_error (*wifi_set_lcr)(wifi_request_id id, wifi_interface_handle iface,
++                               wifi_lcr_information* lcr);
++    wifi_error (*wifi_start_sending_offloaded_packet)(wifi_request_id id,
++                                                      wifi_interface_handle iface, u16 ether_type,
++                                                      u8* ip_packet, u16 ip_packet_len,
++                                                      u8* src_mac_addr, u8* dst_mac_addr,
++                                                      u32 period_msec);
++    wifi_error (*wifi_stop_sending_offloaded_packet)(wifi_request_id id,
++                                                     wifi_interface_handle iface);
++    wifi_error (*wifi_start_rssi_monitoring)(wifi_request_id id, wifi_interface_handle iface,
++                                             s8 max_rssi, s8 min_rssi, wifi_rssi_event_handler eh);
++    wifi_error (*wifi_stop_rssi_monitoring)(wifi_request_id id, wifi_interface_handle iface);
++    wifi_error (*wifi_get_wake_reason_stats)(wifi_interface_handle iface,
++                                             WLAN_DRIVER_WAKE_REASON_CNT* wifi_wake_reason_cnt);
++    wifi_error (*wifi_configure_nd_offload)(wifi_interface_handle iface, u8 enable);
++    wifi_error (*wifi_get_driver_memory_dump)(wifi_interface_handle iface,
++                                              wifi_driver_memory_dump_callbacks callbacks);
++    wifi_error (*wifi_start_pkt_fate_monitoring)(wifi_interface_handle iface);
++    wifi_error (*wifi_get_tx_pkt_fates)(wifi_interface_handle handle,
++                                        wifi_tx_report* tx_report_bufs, size_t n_requested_fates,
++                                        size_t* n_provided_fates);
++    wifi_error (*wifi_get_rx_pkt_fates)(wifi_interface_handle handle,
++                                        wifi_rx_report* rx_report_bufs, size_t n_requested_fates,
++                                        size_t* n_provided_fates);
++    /* NAN functions */
++    wifi_error (*wifi_nan_enable_request)(transaction_id id, wifi_interface_handle iface,
++                                          NanEnableRequest* msg);
++    wifi_error (*wifi_nan_disable_request)(transaction_id id, wifi_interface_handle iface);
++    wifi_error (*wifi_nan_publish_request)(transaction_id id, wifi_interface_handle iface,
++                                           NanPublishRequest* msg);
++    wifi_error (*wifi_nan_publish_cancel_request)(transaction_id id, wifi_interface_handle iface,
++                                                  NanPublishCancelRequest* msg);
++    wifi_error (*wifi_nan_subscribe_request)(transaction_id id, wifi_interface_handle iface,
++                                             NanSubscribeRequest* msg);
++    wifi_error (*wifi_nan_subscribe_cancel_request)(transaction_id id, wifi_interface_handle iface,
++                                                    NanSubscribeCancelRequest* msg);
++    wifi_error (*wifi_nan_transmit_followup_request)(transaction_id id, wifi_interface_handle iface,
++                                                     NanTransmitFollowupRequest* msg);
++    wifi_error (*wifi_nan_stats_request)(transaction_id id, wifi_interface_handle iface,
++                                         NanStatsRequest* msg);
++    wifi_error (*wifi_nan_config_request)(transaction_id id, wifi_interface_handle iface,
++                                          NanConfigRequest* msg);
++    wifi_error (*wifi_nan_tca_request)(transaction_id id, wifi_interface_handle iface,
++                                       NanTCARequest* msg);
++    wifi_error (*wifi_nan_beacon_sdf_payload_request)(transaction_id id,
++                                                      wifi_interface_handle iface,
++                                                      NanBeaconSdfPayloadRequest* msg);
++    wifi_error (*wifi_nan_register_handler)(wifi_interface_handle iface,
++                                            NanCallbackHandler handlers);
++    wifi_error (*wifi_nan_get_version)(wifi_handle handle, NanVersion* version);
++    wifi_error (*wifi_nan_get_capabilities)(transaction_id id, wifi_interface_handle iface);
++    wifi_error (*wifi_nan_data_interface_create)(transaction_id id, wifi_interface_handle iface,
++                                                 char* iface_name);
++    wifi_error (*wifi_nan_data_interface_delete)(transaction_id id, wifi_interface_handle iface,
++                                                 char* iface_name);
++    wifi_error (*wifi_nan_data_request_initiator)(transaction_id id, wifi_interface_handle iface,
++                                                  NanDataPathInitiatorRequest* msg);
++    wifi_error (*wifi_nan_data_indication_response)(transaction_id id, wifi_interface_handle iface,
++                                                    NanDataPathIndicationResponse* msg);
++    wifi_error (*wifi_nan_data_end)(transaction_id id, wifi_interface_handle iface,
++                                    NanDataPathEndRequest* msg);
++    wifi_error (*wifi_select_tx_power_scenario)(wifi_interface_handle iface,
++                                                wifi_power_scenario scenario);
++    wifi_error (*wifi_reset_tx_power_scenario)(wifi_interface_handle iface);
++    /**
++     * Returns the chipset's hardware filtering capabilities:
++     * @param version pointer to version of the packet filter interpreter
++     *                supported, filled in upon return. 0 indicates no support.
++     * @param max_len pointer to maximum size of the filter bytecode, filled in
++     *                upon return.
++     */
++    wifi_error (*wifi_get_packet_filter_capabilities)(wifi_interface_handle handle, u32* version,
++                                                      u32* max_len);
++    /**
++     * Programs the packet filter.
++     * @param program pointer to the program byte-code.
++     * @param len length of the program byte-code.
++     */
++    wifi_error (*wifi_set_packet_filter)(wifi_interface_handle handle, const u8* program, u32 len);
++    wifi_error (*wifi_read_packet_filter)(wifi_interface_handle handle, u32 src_offset,
++                                          u8* host_dst, u32 length);
++    wifi_error (*wifi_get_roaming_capabilities)(wifi_interface_handle handle,
++                                                wifi_roaming_capabilities* caps);
++    wifi_error (*wifi_enable_firmware_roaming)(wifi_interface_handle handle,
++                                               fw_roaming_state_t state);
++    wifi_error (*wifi_configure_roaming)(wifi_interface_handle handle,
++                                         wifi_roaming_config* roaming_config);
++    wifi_error (*wifi_set_radio_mode_change_handler)(wifi_request_id id,
++                                                     wifi_interface_handle iface,
++                                                     wifi_radio_mode_change_handler eh);
++    wifi_error (*wifi_set_latency_mode)(wifi_interface_handle iface, wifi_latency_mode mode);
++    wifi_error (*wifi_set_thermal_mitigation_mode)(wifi_handle handle, wifi_thermal_mode mode,
++                                                   u32 completion_window);
++    wifi_error (*wifi_map_dscp_access_category)(wifi_handle handle, u32 start, u32 end,
++                                                u32 access_category);
++    wifi_error (*wifi_reset_dscp_mapping)(wifi_handle handle);
++    wifi_error (*wifi_virtual_interface_create)(wifi_handle handle, const char* ifname,
++                                                wifi_interface_type iface_type);
++    wifi_error (*wifi_virtual_interface_delete)(wifi_handle handle, const char* ifname);
++    wifi_error (*wifi_set_subsystem_restart_handler)(wifi_handle handle,
++                                                     wifi_subsystem_restart_handler handler);
++    /**
++     * Allow vendor HAL to choose interface name when creating
++     * an interface. This can be implemented by chips with their
++     * own interface naming policy.
++     * If not implemented, the default naming will be used.
++     */
++    wifi_error (*wifi_get_supported_iface_name)(wifi_handle handle, u32 iface_type, char* name,
++                                                size_t len);
++    /**
++     * Perform early initialization steps that are needed when WIFI
++     * is disabled.
++     * If the function returns failure, it means the vendor HAL is unusable
++     * (for example, if chip hardware is not installed) and no further
++     * functions should be called.
++     */
++    wifi_error (*wifi_early_initialize)(void);
++    /**
++     * Get supported feature set which are chip-global, that is
++     * not dependent on any created interface.
++     */
++    wifi_error (*wifi_get_chip_feature_set)(wifi_handle handle, feature_set* set);
++    /**
++     * Invoked to indicate that the provided iface is the primary STA iface when there are more
++     * than 1 STA iface concurrently active.
++     */
++    wifi_error (*wifi_multi_sta_set_primary_connection)(wifi_handle handle,
++                                                        wifi_interface_handle iface);
++    /**
++     * When there are 2 simultaneous STA connections, this use case hint
++     * indicates what STA + STA use-case is being enabled by the framework.
++     */
++    wifi_error (*wifi_multi_sta_set_use_case)(wifi_handle handle, wifi_multi_sta_use_case use_case);
++    /**
++     * Invoked to indicate that the following list of wifi_coex_unsafe_channel should be avoided
++     * with the specified restrictions.
++     * @param unsafeChannels list of current |wifi_coex_unsafe_channel| to avoid.
++     * @param restrictions bitmask of |wifi_coex_restriction| indicating wifi interfaces to
++     *         restrict from the current unsafe channels.
++     */
++    wifi_error (*wifi_set_coex_unsafe_channels)(wifi_handle handle, u32 num_channels,
++                                                wifi_coex_unsafe_channel* unsafeChannels,
++                                                u32 restrictions);
++    /**
++     * Invoked to set voip optimization mode for the provided STA iface
++     */
++    wifi_error (*wifi_set_voip_mode)(wifi_interface_handle iface, wifi_voip_mode mode);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    /**
++     * Get Target Wake Time (TWT) local device capabilities for the station interface.
++     *
++     * @param iface Wifi interface handle
++     * @param capabilities TWT capabilities
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_get_capabilities)(wifi_interface_handle iface,
++                                            wifi_twt_capabilities* capabilities);
++    /**
++     * Register TWT events before sending any TWT request
++     *
++     * @param wifi_interface_handle:
++     * @param events: TWT events callbacks to register
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_register_events)(wifi_interface_handle iface, wifi_twt_events events);
++
++    /**
++     * Setup a TWT session.
++     *
++     * Supported only if wifi_twt_capabilities.is_twt_requester_supported is set. Results in
++     * asynchronous callback wifi_twt_events.on_twt_session_create on success or
++     * wifi_twt_events.on_twt_failure with error code.
++     *
++     * @param id Identifier for the command. The value 0 is reserved.
++     * @param iface Wifi interface handle
++     * @param request TWT request parameters
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_session_setup)(wifi_request_id id, wifi_interface_handle iface,
++                                         wifi_twt_request request);
++    /**
++     * Update a TWT session.
++     *
++     * Supported only if wifi_twt_session.is_updatable is set. Reesults in asynchronous callback
++     * wifi_twt_events.on_twt_session_update on success or wifi_twt_events.on_twt_failure with
++     * error code.
++     *
++     * @param id Identifier for the command. The value 0 is reserved.
++     * @param iface Wifi interface handle
++     * @param session_id TWT session identifier
++     * @param request TWT request parameters
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_session_update)(wifi_request_id id, wifi_interface_handle iface,
++                                          int session_id, wifi_twt_request request);
++    /**
++     * Suspend a TWT session.
++     * Supported only if wifi_twt_session.is_suspendable is set. Results in asynchronous callback
++     * wifi_twt_events.on_twt_session_suspend on success or wifi_twt_events.on_twt_failure with
++     * error code.
++     *
++     * @param id Identifier for the command. The value 0 is reserved.
++     * @param iface Wifi interface handle
++     * @param session_id TWT session identifier
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_session_suspend)(wifi_request_id id, wifi_interface_handle iface,
++                                           int session_id);
++    /**
++     * Resume a suspended TWT session.
++     *
++     * Supported only if wifi_twt_session.is_suspendable is set. Results in asynchronous callback
++     * wifi_twt_events.on_twt_session_resume on success or wifi_twt_events.on_twt_failure with
++     * error code.
++     *
++     * @param id Identifier for the command. The value 0 is reserved.
++     * @param iface Wifi interface handle
++     * @param session_id TWT session identifier
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_session_resume)(wifi_request_id id, wifi_interface_handle iface,
++                                          int session_id);
++    /**
++     * Teardown a TWT session.
++     *
++     * Results in asynchronous callback  wifi_twt_events.on_twt_session_teardown on success or
++     * wifi_twt_events.on_twt_failure with error code.
++     *
++     * @param id Identifier for the command. The value 0 is reserved.
++     * @param iface Wifi interface handle
++     * @param session_id TWT session identifier
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_session_teardown)(wifi_request_id id, wifi_interface_handle iface,
++                                            int session_id);
++
++    /**
++     * Get stats for a TWT session.
++     *
++     * Results in asynchronous callback  wifi_twt_events.on_twt_session_stats on success or
++     * wifi_twt_events.on_twt_failure with error code.
++     *
++     * @param id Identifier for the command. The value 0 is reserved.
++     * @param iface Wifi interface handle
++     * @param session_id TWT session identifier
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_twt_session_get_stats)(wifi_request_id id, wifi_interface_handle iface,
++                                             int session_id);
++#endif
++    /**@brief twt_register_handler
++     *        Request to register TWT callback before sending any TWT request
++     * @param wifi_interface_handle:
++     * @param TwtCallbackHandler: callback function pointers
++     * @return Synchronous wifi_error
++     *
++     * Note: This function is deprecated by wifi_twt_register_events
++     */
++    wifi_error (*wifi_twt_register_handler)(wifi_interface_handle iface,
++                                            TwtCallbackHandler handler);
++    /**@brief twt_get_capability
++     *        Request TWT capability
++     * @param wifi_interface_handle:
++     * @return Synchronous wifi_error and TwtCapabilitySet
++     *
++     * Note: This function is deprecated by wifi_twt_get_capabilities
++     */
++    wifi_error (*wifi_twt_get_capability)(wifi_interface_handle iface,
++                                          TwtCapabilitySet* twt_cap_set);
++    /**@brief twt_setup_request
++     *        Request to send TWT setup frame
++     * @param wifi_interface_handle:
++     * @param TwtSetupRequest: detailed parameters of setup request
++     * @return Synchronous wifi_error
++     * @return Asynchronous EventTwtSetupResponse CB return TwtSetupResponse
++     *
++     * Note: This function is deprecated by wifi_twt_session_setup
++     */
++    wifi_error (*wifi_twt_setup_request)(wifi_interface_handle iface, TwtSetupRequest* msg);
++    /**@brief twt_teardown_request
++     *        Request to send TWT teardown frame
++     * @param wifi_interface_handle:
++     * @param TwtTeardownRequest: detailed parameters of teardown request
++     * @return Synchronous wifi_error
++     * @return Asynchronous EventTwtTeardownCompletion CB return TwtTeardownCompletion
++     * TwtTeardownCompletion may also be received due to other events
++     * like CSA, BTCX, TWT scheduler, MultiConnection, peer-initiated teardown, etc.
++     *
++     * Note: This function is deprecated by wifi_twt_session_teardown
++     */
++    wifi_error (*wifi_twt_teardown_request)(wifi_interface_handle iface, TwtTeardownRequest* msg);
++    /**@brief twt_info_frame_request
++     *        Request to send TWT info frame
++     * @param wifi_interface_handle:
++     * @param TwtInfoFrameRequest: detailed parameters in info frame
++     * @return Synchronous wifi_error
++     * @return Asynchronous EventTwtInfoFrameReceived CB return TwtInfoFrameReceived
++     * Driver may also receive Peer-initiated TwtInfoFrame
++     *
++     * Note: This function is deprecated by wifi_twt_session_suspend and
++     * wifi_twt_session_resume
++     */
++    wifi_error (*wifi_twt_info_frame_request)(wifi_interface_handle iface,
++                                              TwtInfoFrameRequest* msg);
++    /**@brief twt_get_stats
++     *        Request to get TWT stats
++     * @param wifi_interface_handle:
++     * @param config_id: configuration ID of TWT request
++     * @return Synchronous wifi_error and TwtStats
++     *
++     * Note: This function is deprecated by wifi_twt_get_session_stats
++     */
++    wifi_error (*wifi_twt_get_stats)(wifi_interface_handle iface, u8 config_id, TwtStats* stats);
++    /**@brief twt_clear_stats
++     *        Request to clear TWT stats
++     * @param wifi_interface_handle:
++     * @param config_id: configuration ID of TWT request
++     * @return Synchronous wifi_error
++     *
++     * Note: This function is deprecated.
++     */
++    wifi_error (*wifi_twt_clear_stats)(wifi_interface_handle iface, u8 config_id);
++    /**
++     * Invoked to set DTIM configuration when the host is in the suspend mode
++     * @param wifi_interface_handle:
++     * @param multiplier: when STA in the power saving mode, the wake up interval will be set to
++     *              1) multiplier * DTIM period if multiplier > 0.
++     *              2) the device default value if multiplier <=0
++     * Some implementations may apply an additional cap to wake up interval in the case of 1).
++     */
++    wifi_error (*wifi_set_dtim_config)(wifi_interface_handle handle, u32 multiplier);
++    /**@brief wifi_get_usable_channels
++     *        Request list of usable channels for the requested bands and modes. Usable
++     *        implies channel is allowed as per regulatory for the current country code
++     *        and not restricted due to other hard limitations (e.g. DFS, Coex) In
++     *        certain modes (e.g. STA+SAP) there could be other hard restrictions
++     *        since MCC operation many not be supported by SAP. This API also allows
++     *        driver to return list of usable channels for each mode uniquely to
++     *        distinguish cases where only a limited set of modes are allowed on
++     *        a given channel e.g. srd channels may be supported for P2P but not
++     *        for SAP or P2P-Client may be allowed on an indoor channel but P2P-GO
++     *        may not be allowed. This API is not interface specific and will be
++     *        used to query capabilities of driver in terms of what modes (STA, SAP,
++     *        P2P_CLI, P2P_GO, NAN, TDLS) can be supported on each of the channels.
++     * @param handle global wifi_handle
++     * @param band_mask BIT MASK of WLAN_MAC* as represented by |wlan_mac_band|
++     * @param iface_mode_mask BIT MASK of BIT(WIFI_INTERFACE_*) represented by
++     *        |wifi_interface_mode|. Bitmask respresents all the modes that the
++     *        caller is interested in (e.g. STA, SAP, WFD-CLI, WFD-GO, TDLS, NAN).
++     *        Note: Bitmask does not represent concurrency matrix. If the caller
++     *        is interested in CLI, GO modes, the iface_mode_mask would be set
++     *        to WIFI_INTERFACE_P2P_CLIENT|WIFI_INTERFACE_P2P_GO.
++     * @param filter_mask BIT MASK of WIFI_USABLE_CHANNEL_FILTER_* represented by
++     *        |wifi_usable_channel_filter|. Indicates if the channel list should
++     *        be filtered based on additional criteria. If filter_mask is not
++     *        specified, driver should return list of usable channels purely
++     *        based on regulatory constraints.
++     * @param max_size maximum number of |wifi_usable_channel|
++     * @param size actual number of |wifi_usable_channel| entries returned by driver
++     * @param channels list of usable channels represented by |wifi_usable_channel|
++     */
++    wifi_error (*wifi_get_usable_channels)(wifi_handle handle, u32 band_mask, u32 iface_mode_mask,
++                                           u32 filter_mask, u32 max_size, u32* size,
++                                           wifi_usable_channel* channels);
++    /**
++     * Trigger wifi subsystem restart to reload firmware
++     */
++    wifi_error (*wifi_trigger_subsystem_restart)(wifi_handle handle);
++    /**
++     * Invoked to set that the device is operating in an indoor environment.
++     * @param handle global wifi_handle
++     * @param isIndoor: true if the device is operating in an indoor
++     *        environment, false otherwise.
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_set_indoor_state)(wifi_handle handle, bool isIndoor);
++    /**@brief wifi_get_supported_radio_combinations_matrix
++     *        Request all the possible radio combinations this device can offer.
++     * @param handle global wifi_handle
++     * @param max_size maximum size allocated for filling the wifi_radio_combination_matrix
++     * @param wifi_radio_combination_matrix to return all the possible radio
++     *        combinations.
++     * @param size actual size of wifi_radio_combination_matrix returned from
++     *        lower layer
++     *
++     */
++    wifi_error (*wifi_get_supported_radio_combinations_matrix)(
++            wifi_handle handle, u32 max_size, u32* size,
++            wifi_radio_combination_matrix* radio_combination_matrix);
++    /**@brief wifi_nan_rtt_chre_enable_request
++     *        Request to enable CHRE NAN RTT
++     * @param transaction_id: NAN transaction id
++     * @param wifi_interface_handle
++     * @param NanEnableRequest request message
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_nan_rtt_chre_enable_request)(transaction_id id, wifi_interface_handle iface,
++                                                   NanEnableRequest* msg);
++    /**@brief wifi_nan_rtt_chre_disable_request
++     *        Request to disable CHRE NAN RTT
++     * @param transaction_id: NAN transaction id
++     * @param wifi_interface_handle
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_nan_rtt_chre_disable_request)(transaction_id id, wifi_interface_handle iface);
++    /**@brief wifi_chre_register_handler
++     *        register a handler to get the state of CHR
++     * @param wifi_interface_handle
++     * @param wifi_chre_handler: callback function pointer
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_chre_register_handler)(wifi_interface_handle iface,
++                                             wifi_chre_handler handler);
++    /**@brief wifi_enable_tx_power_limits
++     *        Enable WiFi Tx power limis
++     * @param wifi_interface_handle
++     * @param isEnable : If enable TX limit or not
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_enable_tx_power_limits)(wifi_interface_handle iface, bool isEnable);
++    /**@brief wifi_get_cached_scan_results
++     *        Retrieve scan results cached in wifi firmware
++     * @param wifi_interface_handle
++     * @param wifi_cached_scan_result_handler : callback function pointer
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_get_cached_scan_results)(wifi_interface_handle iface,
++                                               wifi_cached_scan_result_handler handler);
++    /**@brief wifi_get_chip_capabilities
++     *        Retrieve capabilities supported by this chip
++     * @param wifi_handle
++     * @return Synchronous wifi_error and chip capabilites
++     */
++    wifi_error (*wifi_get_chip_capabilities)(wifi_handle handle,
++                                             wifi_chip_capabilities* chip_capabilities);
++    /**@brief wifi_get_supported_iface_concurrency_matrix
++     *        Request all the possible interface concurrency combinations this
++     *        Wifi Chip can offer.
++     * @param handle global wifi_handle
++     * @param wifi_iface_concurrency_matrix to return all the possible
++     *        interface concurrency combinations.
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_get_supported_iface_concurrency_matrix)(
++            wifi_handle handle, wifi_iface_concurrency_matrix* matrix);
++    /**@brief wifi_enable_sta_channel_for_peer_network
++     *        enable or disable the feature of allowing current STA-connected
++     *        channel for WFA GO, SAP and Wi-Fi Aware when the regulatory allows.
++     * @param handle global wifi_handle
++     * @param channelCategoryEnableFlag bitmask of |wifi_channel_category|.
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_enable_sta_channel_for_peer_network)(wifi_handle handle,
++                                                           u32 channelCategoryEnableFlag);
++    /**@brief wifi_nan_suspend_request
++     * Request that the specified NAN session be suspended.
++     * @param transaction_id: NAN transaction id
++     * @param wifi_interface_handle
++     * @param NanSuspendRequest request message
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_nan_suspend_request)(transaction_id id, wifi_interface_handle iface,
++                                           NanSuspendRequest* msg);
++    /**@brief wifi_nan_resume_request
++     * Request that the specified NAN session be resumed.
++     * @param transaction_id: NAN transaction id
++     * @param wifi_interface_handle
++     * @param NanResumeRequest request message
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_nan_resume_request)(transaction_id id, wifi_interface_handle iface,
++                                          NanResumeRequest* msg);
++    wifi_error (*wifi_nan_pairing_request)(transaction_id id, wifi_interface_handle iface,
++                                           NanPairingRequest* msg);
++    wifi_error (*wifi_nan_pairing_indication_response)(transaction_id id,
++                                                       wifi_interface_handle iface,
++                                                       NanPairingIndicationResponse* msg);
++    wifi_error (*wifi_nan_bootstrapping_request)(transaction_id id, wifi_interface_handle iface,
++                                                 NanBootstrappingRequest* msg);
++    wifi_error (*wifi_nan_bootstrapping_indication_response)(
++            transaction_id id, wifi_interface_handle iface,
++            NanBootstrappingIndicationResponse* msg);
++    /**@brief wifi_set_scan_mode
++     *        Notify driver/firmware current is scan only mode to allow lower
++     *        level to optimize power consumption.
++     * @param enable true if current is scan only mode
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_set_scan_mode)(wifi_interface_handle iface, bool enable);
++    wifi_error (*wifi_nan_pairing_end)(transaction_id id, wifi_interface_handle iface,
++                                       NanPairingEndRequest* msg);
++    /**@brief wifi_set_mlo_mode
++     * Set Multi-Link Operation mode.
++     * @param handle global wifi_handle
++     * @param mode: MLO mode
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_set_mlo_mode)(wifi_handle handle, wifi_mlo_mode mode);
++#ifndef USE_PRE_U_QPR2_STRUCT
++    /**@brief wifi_virtual_interface_create_with_vendor_data
++     * Create new virtual interface using vendor data.
++     * @param handle: global wifi_handle
++     * @param ifname: name of interface to be created.
++     * @param iface_type: one of interface types from wifi_interface_type.
++     * @param vendor_data: vendor data to apply on this interface.
++     * @return Synchronous wifi_error
++     */
++    wifi_error (*wifi_virtual_interface_create_with_vendor_data)(wifi_handle handle,
++                                                                 const char* ifname,
++                                                                 wifi_interface_type iface_type,
++                                                                 wifi_vendor_data* vendor_data);
++#endif
++    /*
++     * when adding new functions make sure to add stubs in
++     * wifi_legacy_hal_stubs.cpp::initHalFuncTableWithStubs
++     */
++} wifi_hal_legacy_fn;
++
++typedef wifi_error (*init_wifi_vendor_hal_func_table_legacy_t)(wifi_hal_legacy_fn*);
+diff --git a/wlan_assistant/Android.bp b/wlan_assistant/Android.bp
+new file mode 100644
+index 0000000..4147ebe
+--- /dev/null
++++ b/wlan_assistant/Android.bp
+@@ -0,0 +1,17 @@
++//
++// SPDX-FileCopyrightText: The LineageOS Project
++// SPDX-License-Identifier: Apache-2.0
++//
++
++cc_binary {
++    name: "wlan_assistant",
++    srcs: ["main.cpp"],
++    shared_libs: [
++        "libbase",
++        "libcutils",
++        "liblog",
++    ],
++
++    vendor: true,
++    init_rc: ["wlan_assistant.rc"],
++}
+diff --git a/wlan_assistant/main.cpp b/wlan_assistant/main.cpp
+new file mode 100644
+index 0000000..81e05ac
+--- /dev/null
++++ b/wlan_assistant/main.cpp
+@@ -0,0 +1,273 @@
++//
++// SPDX-FileCopyrightText: The LineageOS Project
++// SPDX-License-Identifier: Apache-2.0
++//
++
++#define LOG_TAG "WLAN-ASSISTANT"
++
++#include <linux/fs.h>
++#include <linux/inotify.h>
++#include <sys/inotify.h>
++#include <sys/ioctl.h>
++#include <sys/stat.h>
++
++#include <dirent.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <string>
++#include <vector>
++
++#include <android-base/file.h>
++#include <android-base/logging.h>
++#include <android-base/properties.h>
++#include <android-base/strings.h>
++
++#define MAX_WAIT_SECOND LONG_MAX
++#define MAX_RETRY_COUNT 5
++#define NVRAM_MAC_ADDRESS_OFFSET 4
++#define WIFI_LOADER_DEV "/dev/wmtWifi"
++#define WIFI_NVRAM_PATH "/mnt/vendor/nvdata/APCFG/APRDEB"
++#define WIFI_NVRAM_INI_FILE "/data/vendor/nvramwifi"
++#define WIFI_MACADDR_FILE "/data/vendor/macwifi"
++
++#define BOOT_META_STR "meta"
++
++#define FILE_REMOVE_MASK (IN_DELETE_SELF | IN_MOVE_SELF)
++#define FILE_MODIFY_MASK IN_MODIFY
++#define WATCH_FILE_MASK (FILE_REMOVE_MASK | FILE_MODIFY_MASK)
++#define WATCH_PATH_MASK (IN_MOVED_TO | IN_CREATE)
++
++#define NVRAM_CHANGED 4
++
++#define INOT_BUF_SIZE (4 * (sizeof(struct inotify_event) + NAME_MAX + 1))
++
++using android::base::GetProperty;
++using android::base::ReadFileToString;
++using android::base::SetProperty;
++using android::base::Trim;
++using android::base::WriteStringToFile;
++
++bool write_data_to_driver(const std::string& data) {
++    if (data.empty()) return false;
++
++    if (!WriteStringToFile(data, WIFI_LOADER_DEV)) {
++        LOG(DEBUG) << "write data to driver failed reason is " << strerror(errno);
++        return false;
++    }
++
++    return true;
++}
++
++bool get_custom_mac_address(std::vector<char>& mac) {
++    std::string mac_str;
++    if (!ReadFileToString(WIFI_MACADDR_FILE, &mac_str)) {
++        LOG(DEBUG) << "Unable to access mac file";
++        return false;
++    }
++
++    mac_str = Trim(mac_str);
++    if (mac_str.length() >= 17) {
++        LOG(DEBUG) << "MAC ADDR = " << mac_str;
++        mac.resize(6);
++        for (int i = 0; i < 6; i++) {
++            mac[i] = static_cast<char>(std::strtol(mac_str.c_str() + i * 3, nullptr, 16));
++            LOG(DEBUG) << "mac[" << i << "] = " << std::hex << (int)mac[i];
++        }
++        return true;
++    }
++
++    return false;
++}
++
++bool write_nvram(const std::string& filename) {
++    struct stat stat_nvram;
++    int nvram_size = 0;
++
++    /* sleep 1 more second in case that daemon is still writing */
++    for (int i = 0; i < MAX_RETRY_COUNT; i++) {
++        if (stat(filename.c_str(), &stat_nvram) == -1) {
++            LOG(DEBUG) << "stat " << filename << " error";
++            sleep(1);
++            continue;
++        }
++        nvram_size = stat_nvram.st_size - 2;
++
++        LOG(DEBUG) << "nvram size = " << nvram_size;
++        if (nvram_size > 0 && (nvram_size & 0x0ff) == 0) break;
++        sleep(1);
++    }
++
++    if (nvram_size <= 0 || (nvram_size & 0x0ff) != 0) {
++        LOG(DEBUG) << "invalid nvram size";
++        return false;
++    }
++
++    std::string nvram_data;
++    if (!ReadFileToString(filename, &nvram_data)) {
++        LOG(DEBUG) << "Error opening nvram file";
++        return false;
++    }
++
++    if (nvram_data.length() < static_cast<size_t>(nvram_size)) {
++        LOG(DEBUG) << "short read on nvram file (" << nvram_data.length() << " of " << nvram_size
++                   << ")";
++        return false;
++    }
++
++    std::string acnvram = "WR-BUF:NVRAM";
++    acnvram += nvram_data.substr(0, nvram_size);
++
++    std::vector<char> mac;
++    if (get_custom_mac_address(mac)) {
++        for (size_t i = 0; i < mac.size(); i++) {
++            acnvram[12 + NVRAM_MAC_ADDRESS_OFFSET + i] = mac[i];
++        }
++    }
++
++    if (!write_data_to_driver(acnvram)) {
++        LOG(DEBUG) << "write nvram to driver error";
++        return false;
++    } else {
++        SetProperty("vendor.mtk.nvram.ready", "1");
++    }
++
++    return true;
++}
++
++int file_event_hander(int inot_fd, int wd, struct inotify_event* event, const std::string& path,
++                      const std::string& file_name) {
++    std::string file_path = path + "/" + file_name;
++
++    if ((event->mask & WATCH_PATH_MASK) && event->name == file_name) {
++        inotify_rm_watch(inot_fd, wd);
++        wd = inotify_add_watch(inot_fd, file_path.c_str(), WATCH_FILE_MASK);
++    } else if (event->mask & FILE_REMOVE_MASK) {
++        inotify_rm_watch(inot_fd, wd);
++        if (access(file_path.c_str(), R_OK) >= 0)
++            wd = inotify_add_watch(inot_fd, file_path.c_str(), WATCH_FILE_MASK);
++        else
++            wd = inotify_add_watch(inot_fd, path.c_str(), WATCH_PATH_MASK);
++    }
++    return wd;
++}
++
++std::string get_custom_nvram_file_name() {
++    std::string filename = std::string(WIFI_NVRAM_PATH) + "/";
++    std::string buf;
++
++    if (ReadFileToString(WIFI_NVRAM_INI_FILE, &buf) && !buf.empty()) {
++        filename += Trim(buf);
++    } else {
++        filename += "WIFI";
++    }
++
++    LOG(DEBUG) << "custom nvram filename = " << filename;
++    return filename;
++}
++
++void* wlan_files_monitor(void* /* pdata */) {
++    LOG(DEBUG) << "Running wlan_files_monitor";
++
++    LOG(DEBUG) << "Start to wait wmtWifi ready";
++    while (access(WIFI_LOADER_DEV, R_OK | W_OK) < 0) usleep(100000);
++
++    struct stat stat_buf;
++    if (stat(WIFI_LOADER_DEV, &stat_buf) == -1) {
++        LOG(DEBUG) << "stat WIFI_LOADER_DEV fail";
++        return nullptr;
++    }
++    if (!S_ISCHR(stat_buf.st_mode)) {
++        LOG(DEBUG) << WIFI_LOADER_DEV << " is not a char device";
++        return nullptr;
++    }
++
++    int inot_fd = inotify_init();
++    if (inot_fd < 0) {
++        LOG(DEBUG) << "inotify_init error";
++        return nullptr;
++    }
++    int dev_wd = inotify_add_watch(inot_fd, WIFI_LOADER_DEV, FILE_REMOVE_MASK);
++
++    std::string nvram_filename = get_custom_nvram_file_name();
++    std::string just_filename = nvram_filename.substr(strlen(WIFI_NVRAM_PATH) + 1);
++
++    LOG(DEBUG) << "nvram_path_file = " << nvram_filename << ", nvrma_file = " << just_filename;
++
++    LOG(DEBUG) << "Start to check if NVRAM existed";
++    while (access(nvram_filename.c_str(), R_OK) < 0) sleep(1);
++
++    int nvram_wd = inotify_add_watch(inot_fd, nvram_filename.c_str(), WATCH_FILE_MASK);
++    write_nvram(nvram_filename);
++
++    std::string boot_mode = GetProperty("ro.bootmode", "-1");
++    LOG(DEBUG) << "read boot mode:" << boot_mode;
++
++    bool running = true;
++    if (boot_mode.find(BOOT_META_STR) == 0) {
++        running = false;
++    }
++
++    // Force memory alignment for inotify_event struct casting
++    char buf[INOT_BUF_SIZE] __attribute__((aligned(__alignof__(struct inotify_event))));
++    long timeout_sec = MAX_WAIT_SECOND;
++    int changed = 0;
++
++    while (running) {
++        struct timeval timeout;
++        timeout.tv_sec = timeout_sec;
++        timeout.tv_usec = 0;
++
++        fd_set inot_fd_set;
++        FD_ZERO(&inot_fd_set);
++        FD_SET(inot_fd, &inot_fd_set);
++
++        int readlen = select(inot_fd + 1, &inot_fd_set, nullptr, nullptr, &timeout);
++        if (readlen < 0 && errno == EINTR) continue;
++
++        if (!readlen) {
++            LOG(DEBUG) << "will sync to driver, changed " << std::hex << changed;
++            if (changed & NVRAM_CHANGED) write_nvram(nvram_filename);
++            changed = 0;
++            timeout_sec = MAX_WAIT_SECOND;
++            continue;
++        }
++
++        ssize_t readbytes = read(inot_fd, buf, sizeof(buf));
++        ssize_t offset = 0;
++
++        while (readbytes > offset) {
++            struct inotify_event* event = reinterpret_cast<struct inotify_event*>(&buf[offset]);
++            offset += sizeof(struct inotify_event) + event->len;
++
++            if (event->mask & IN_IGNORED) continue;
++
++            if (event->wd == dev_wd && (event->mask & FILE_REMOVE_MASK)) {
++                LOG(DEBUG) << "/dev/wmtWifi was removed, need to exit";
++                running = false;
++                break;
++            }
++
++            if (event->wd == nvram_wd) {
++                nvram_wd =
++                        file_event_hander(inot_fd, nvram_wd, event, WIFI_NVRAM_PATH, just_filename);
++                changed |= NVRAM_CHANGED;
++            }
++        }
++        if (changed > 0) timeout_sec = 1;
++    }
++
++    if (dev_wd > 0) inotify_rm_watch(inot_fd, dev_wd);
++    if (nvram_wd > 0) inotify_rm_watch(inot_fd, nvram_wd);
++    close(inot_fd);
++
++    return nullptr;
++}
++
++int main(int /* argc */, char** /* argv */) {
++    wlan_files_monitor(nullptr);
++    return 0;
++}
+diff --git a/wlan_assistant/wlan_assistant.rc b/wlan_assistant/wlan_assistant.rc
+new file mode 100644
+index 0000000..60261c7
+--- /dev/null
++++ b/wlan_assistant/wlan_assistant.rc
+@@ -0,0 +1,4 @@
++service wlan_assistant /vendor/bin/wlan_assistant
++    class main
++    user wifi
++    group system gps inet
+diff --git a/wpa_supplicant_8_lib/Android.bp b/wpa_supplicant_8_lib/Android.bp
+new file mode 100644
+index 0000000..5355c3a
+--- /dev/null
++++ b/wpa_supplicant_8_lib/Android.bp
+@@ -0,0 +1,49 @@
++// Fix (A15 / lineage-22.2):
++// lib_driver_cmd_mt66xx 原本只在 Android.mk 里定义为 BUILD_STATIC_LIBRARY。
++// A15 起 hostapd / wpa_supplicant 已是 soong 模块，通过 soong_config 变量
++// board_hostapd_private_lib / board_wpa_supplicant_private_lib（值 =
++// lib_driver_cmd_mt66xx，来自 BoardConfig.mk）把本库注进 static_libs，
++// 而 soong bootstrap 只读 .bp 不读 .mk → 必须在此提供 soong 定义。
++// 与 A14 对 wifi_hal/libwifi-hal-mt66xx 的修法完全一致
++// （Android.mk 里同名模块已改名 -legacy 以避免与本节 soong 模块冲突）。
++// 编译参数对齐原 Android.mk：仅 -DCONFIG_ANDROID_LOG（arm 追加 -mabi=aapcs-linux），
++// 头文件包含 = WPA_SUPPL_DIR_INCLUDE + external/libnl/include。
++cc_library_static {
++    name: "lib_driver_cmd_mt66xx",
++    proprietary: true,
++    owner: "mtk",
++    srcs: [
++        "mediatek_driver_cmd_nl80211.c",
++    ],
++    cflags: [
++        "-DCONFIG_ANDROID_LOG",
++        "-Wno-unused-parameter",
++        "-Wno-sign-compare",
++        "-Wno-unused-variable",
++        "-Wno-implicit-function-declaration",
++        // A15: bionic linux/wireless.h 已定义 IW_PMKID_LEN，MTK 私有头重复定义(同值) → 抑制 -Werror=-Wmacro-redefined
++        "-Wno-macro-redefined",
++    ],
++    include_dirs: [
++        "external/libnl/include",
++        "external/wpa_supplicant_8/src",
++        "external/wpa_supplicant_8/src/common",
++        "external/wpa_supplicant_8/src/drivers",
++        "external/wpa_supplicant_8/src/l2_packet",
++        "external/wpa_supplicant_8/src/utils",
++        "external/wpa_supplicant_8/src/wps",
++        "external/wpa_supplicant_8/wpa_supplicant",
++    ],
++    shared_libs: [
++        "libc",
++        "libcutils",
++        "libnl",
++    ],
++    arch: {
++        arm: {
++            cflags: [
++                "-mabi=aapcs-linux",
++            ],
++        },
++    },
++}

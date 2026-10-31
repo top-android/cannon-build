@@ -1,10 +1,11 @@
-# top-android / cannon — LineageOS 21 / 22.2 构建
+# top-android / cannon — LineageOS 21 / 22.2 / 23.2 构建
 
 Xiaomi Redmi Note 9T 5G（`cannon` / `cannong`，MT6853T）在 A12 厂商底座上的构建入口。
 支持两套目标：
 
 - **A14 / LineageOS 21**（默认，`lineage_cannon-ap2a-userdebug`）
 - **A15 / LineageOS 22.2**（`lineage_cannon-bp1a-user`，已适配完成并发布）
+- **A16 / LineageOS 23.2**（`lineage_cannon bp4a userdebug`，Android 16；**lunch 需三参** product/release/variant）
 
 目标：**clone 这一个仓库 → 一条 `./build.sh` 命令 → 出包**，不再依赖任何本机手工 sed。
 
@@ -21,18 +22,21 @@ cd cannon-build
 
 # A15：LineageOS 22.2（已适配，产出 user 变体）
 ./build.sh a15       # init(lineage-22.2) + sync + apply A15 补丁(幂等) + build
+
+# A16：LineageOS 23.2 / Android 16（release=bp4a，lunch 三参 lineage_cannon bp4a userdebug）
+./build.sh a16       # init(lineage-23.2) + sync + apply A16 补丁(幂等) + build
 ```
 
-`a15` 与 `all` 的差别只是切几个变量，**`all`（A14）默认行为完全不变**：
+`a15`/`a16` 与 `all` 的差别只是切几个变量，**`all`（A14）默认行为完全不变**：
 
-| 项 | `all`（A14 默认） | `a15` |
-|---|---|---|
-| `MANIFEST_BRANCH` | `lineage-21.0` | `lineage-22.2` |
-| `LOCAL_MANIFEST_NAME` | `cannon.xml` | `cannon-22.2.xml` |
-| `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | `lineage_cannon-bp1a-user` |
-| 编译前补丁 | 无 | `apply_a15_cannon_patches.sh`（幂等，已提交进 fork 的自动跳过） |
+| 项 | `all`（A14 默认） | `a15` | `a16` |
+|---|---|---|---|
+| `MANIFEST_BRANCH` | `lineage-21.0` | `lineage-22.2` | `lineage-23.2` |
+| `LOCAL_MANIFEST_NAME` | `cannon.xml` | `cannon-22.2.xml` | `cannon-23.2.xml` |
+| `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | `lineage_cannon-bp1a-user` | `lineage_cannon bp4a userdebug`（三参 lunch） |
+| 编译前补丁 | 无 | `apply_a15_cannon_patches.sh`（幂等，已提交进 fork 的自动跳过） | `apply_a16_cannon_patches.sh`（幂等） |
 
-也可用环境变量临时切：`PROFILE=a15 ./build.sh all`。
+也可用环境变量临时切：`PROFILE=a15 ./build.sh all` 或 `PROFILE=a16 ./build.sh all`。
 
 单独跑：
 
@@ -53,8 +57,8 @@ cd cannon-build
 | `JOBS` | `8` | `bacon` 在 `-j16` 会 OOM（exit 137） |
 | `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | |
 
-> 选 `a15`（或 `PROFILE=a15`）会覆盖 `MANIFEST_BRANCH` / `LOCAL_MANIFEST_NAME` / `LUNCH_TARGET`
-> 并启用编译前补丁，见上面 profile 对照表；不选就是 A14 默认。
+> 选 `a15`/`a16`（或 `PROFILE=a15`/`PROFILE=a16`）会覆盖 `MANIFEST_BRANCH` / `LOCAL_MANIFEST_NAME` / `LUNCH_TARGET`
+> 并启用对应的编译前补丁，见上面 profile 对照表；不选就是 A14 默认。A16 的 lunch 走三参（`lineage_cannon bp4a userdebug`）。
 
 ## 前置条件
 
@@ -232,3 +236,11 @@ boot / recovery / dtbo / vbmeta 是物理分区（bootloader 刷），system / v
   `lineage_cannon-bp1a-user` 源码树已全量编出并发布。沿途漂移均已处理：
   VNDK 废弃、`TARGET_LD_SHIM_LIBS` 失效（改 patchelf 注入 NEEDED）、
   `ro.build.display.id` 落点从 `sysprop.mk` 迁到 `build/soong/scripts/gen_build_prop.py`。
+
+- [ ] **A16（LineageOS 23.2 / Android 16）适配**（进行中，用 `./build.sh a16`）
+  构建配置已就绪：`lineage-23.2` + `cannon-23.2.xml` + 三参 lunch（`lineage_cannon bp4a userdebug`）
+  + `apply_a16_cannon_patches.sh`（`repro/patches/a16/`，20 仓补丁，幂等重放；
+  由 `scripts/export_a16_dirty_patches.sh` 从源码树导出，tracked diff + untracked 新源码均为合法可 apply 的 diff）。
+  首轮已撞 soong 严格化漂移（详见本仓 docs/A16_FIX_PLAYBOOK.md 之 A16-D1/D2）：
+  init.mt6853.usb.rc 多 namespace 撞名、lib_driver_cmd_mt66xx 缺 Android.bp、
+  fsgen 强制单 arch（cas@1.2-service 缺 arm64 变体待解）。

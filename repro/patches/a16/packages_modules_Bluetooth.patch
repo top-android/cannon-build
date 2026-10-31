@@ -1,0 +1,85 @@
+diff --git a/android/app/src/com/android/bluetooth/a2dp/A2dpService.java b/android/app/src/com/android/bluetooth/a2dp/A2dpService.java
+index 08cd9d9..06523b4 100644
+--- a/android/app/src/com/android/bluetooth/a2dp/A2dpService.java
++++ b/android/app/src/com/android/bluetooth/a2dp/A2dpService.java
+@@ -475,6 +475,11 @@ public class A2dpService extends ConnectableProfile {
+                                     + "): current is "
+                                     + mActiveDevice
+                                     + " no changed");
++                    // cannon: 重新通知 AudioManager，让音频策略(重)注册 A2DP 输出设备。
++                    // 部分 vendor 栈会丢掉首次激活通知，导致 A2DP 设备在音频策略里未注册（声音留在扬声器）。
++                    // previous==null 使框架视为"设备变为活动"(幂等)。
++                    mAudioManager.handleBluetoothActiveDeviceChanged(device, null,
++                            BluetoothProfileConnectionInfo.createA2dpInfo(true, -1));
+                     // returns true since the device is activated even double attempted
+                     return true;
+                 }
+diff --git a/system/audio_hal_interface/aidl/client_interface_aidl.cc b/system/audio_hal_interface/aidl/client_interface_aidl.cc
+index c1ce661..3398012 100644
+--- a/system/audio_hal_interface/aidl/client_interface_aidl.cc
++++ b/system/audio_hal_interface/aidl/client_interface_aidl.cc
+@@ -87,7 +87,7 @@ std::vector<AudioCapabilities> BluetoothAudioClientInterface::GetAudioCapabiliti
+     return capabilities;
+   }
+   auto provider_factory = IBluetoothAudioProviderFactory::fromBinder(::ndk::SpAIBinder(
+-          AServiceManager_waitForService(kDefaultAudioProviderFactoryInterface.c_str())));
++          AServiceManager_checkService(kDefaultAudioProviderFactoryInterface.c_str())));
+ 
+   if (provider_factory == nullptr) {
+     log::error("can't get capability from unknown factory");
+@@ -112,7 +112,7 @@ BluetoothAudioClientInterface::GetProviderInfo(
+ 
+   if (provider_factory == nullptr) {
+     provider_factory = IBluetoothAudioProviderFactory::fromBinder(::ndk::SpAIBinder(
+-            AServiceManager_waitForService(kDefaultAudioProviderFactoryInterface.c_str())));
++            AServiceManager_checkService(kDefaultAudioProviderFactoryInterface.c_str())));
+   }
+ 
+   if (provider_factory == nullptr) {
+@@ -144,7 +144,7 @@ void BluetoothAudioClientInterface::FetchAudioProvider() {
+   // re-registered, so we need to re-fetch the service.
+   for (int retry_no = 0; retry_no < kFetchAudioProviderRetryNumber; ++retry_no) {
+     auto provider_factory = IBluetoothAudioProviderFactory::fromBinder(::ndk::SpAIBinder(
+-            AServiceManager_waitForService(kDefaultAudioProviderFactoryInterface.c_str())));
++            AServiceManager_checkService(kDefaultAudioProviderFactoryInterface.c_str())));
+ 
+     if (provider_factory == nullptr) {
+       log::error("can't get capability from unknown factory");
+diff --git a/system/gd/hci/hci_layer.cc b/system/gd/hci/hci_layer.cc
+index 0ab2036..079e28b 100644
+--- a/system/gd/hci/hci_layer.cc
++++ b/system/gd/hci/hci_layer.cc
+@@ -275,10 +275,30 @@ struct HciLayer::impl {
+                        "assert failed: command_complete_view.IsValid()");
+       (*command_queue_.front().GetCallback<CommandCompleteView>())(command_complete_view);
+     } else if (waiting_for != WaitingFor::STATUS_OR_COMPLETE) {
+-      log::assert_that((waiting_for == WaitingFor::STATUS) == is_status,
+-                       "{} was not expecting {} event", OpCodeText(op_code), logging_id);
++      // cannon A15 老 vendor 适配：控制器对"本应回 Command Complete"的命令回了 Command Status
++      // （MTK 对 HCI_Sniff_Subrating 0x0811 回 UNSUPPORTED_REMOTE_OR_LMP_FEATURE 即此）。
++      // 若照下面 assert_that 走会 LOG_ALWAYS_FATAL abort bluetooth（静默进 sniff 即掉线重连）。
++      // 移植 A14 修法到 A15 结构：造一个**合法**的 error Command Complete（真实 opcode + 真实
++      // 状态）交给 COMPLETE 回调，让 legacy 层走正常失败分支，而非进程 abort。
++      if (is_status && waiting_for == WaitingFor::COMPLETE) {
++        auto payload = std::make_unique<packet::RawBuilder>();
++        payload->AddOctets1(static_cast<uint8_t>(status_view.GetStatus()));
++        auto complete_event_builder = CommandCompleteBuilder::Create(
++                status_view.GetNumHciCommandPackets(), status_view.GetCommandOpCode(),
++                std::move(payload));
++        auto complete = std::make_shared<std::vector<std::uint8_t>>(
++                complete_event_builder->SerializeToBytes());
++        CommandCompleteView command_complete_view = CommandCompleteView::Create(
++                EventView::Create(PacketView<kLittleEndian>(complete)));
++        log::assert_that(command_complete_view.IsValid(),
++                         "assert failed: command_complete_view.IsValid()");
++        (*command_queue_.front().GetCallback<CommandCompleteView>())(command_complete_view);
++      } else {
++        log::assert_that((waiting_for == WaitingFor::STATUS) == is_status,
++                         "{} was not expecting {} event", OpCodeText(op_code), logging_id);
+ 
+-      (*command_queue_.front().GetCallback<TResponse>())(std::move(response_view));
++        (*command_queue_.front().GetCallback<TResponse>())(std::move(response_view));
++      }
+     } else {
+       (*command_queue_.front().GetCallback<CommandStatusOrCompleteView>())(
+               std::move(response_view));

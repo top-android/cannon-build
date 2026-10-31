@@ -1,0 +1,30 @@
+diff --git a/device.mk b/device.mk
+index 168f18b..c332a00 100644
+--- a/device.mk
++++ b/device.mk
+@@ -401,7 +401,7 @@ PRODUCT_PACKAGES += \
+     init.connectivity.rc \
+     init.modem.rc \
+     init.mt6853.rc \
+-    init.mt6853.usb.rc \
++    init.mt6853.usb.cannon.rc \
+     init.project.rc \
+     init.sensor_2_0.rc \
+     ueventd.mtk.rc
+diff --git a/rootdir/Android.bp b/rootdir/Android.bp
+index b189e78..103eb1a 100644
+--- a/rootdir/Android.bp
++++ b/rootdir/Android.bp
+@@ -26,8 +26,11 @@ prebuilt_etc {
+     vendor: true,
+ }
+ 
++// USB：module 名加 .cannon 以避开 hardware/mediatek 经 target_board_platform
++// 自动生成的同名 module（init.%s.usb.rc → init.mt6853.usb.rc），安装文件名保持原名。
+ prebuilt_etc {
+-    name: "init.mt6853.usb.rc",
++    name: "init.mt6853.usb.cannon.rc",
++    filename: "init.mt6853.usb.rc",
+     src: "etc/init.mt6853.usb.rc",
+     sub_dir: "init/hw",
+     vendor: true,

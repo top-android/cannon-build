@@ -7,6 +7,7 @@
 #   ./build.sh build    lunch + m bacon
 #   ./build.sh all      init + sync + build            （A14 / LineageOS 21，默认）
 #   ./build.sh a15      A15 专用：init + sync + apply 补丁 + build（LineageOS 22.2）
+#   ./build.sh a16      A16 专用：init + sync + apply 补丁 + build（LineageOS 23.2 / Android 16）
 #
 # A14 不受影响：不选 a15、不设 PROFILE=a15 时，行为与旧版完全一致。
 # 也可用环境变量覆盖：PROFILE=a15 ./build.sh all
@@ -26,6 +27,10 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 # ---- local_manifests 与补丁开关（A14 默认值保持不变）----
 LOCAL_MANIFEST_NAME="${LOCAL_MANIFEST_NAME:-cannon.xml}"
 APPLY_PATCHES="${APPLY_PATCHES:-0}"
+# ---- 按 profile 选择的辅助变量（A14 默认空）----
+LUNCH_ARGS=()          # 非空时 cmd_build 用多参 lunch（A16 需三参：product release variant）
+APPLY_SCRIPT=""        # profile 决定用哪个 apply_*_cannon_patches.sh
+PATCH_SUBDIR=""        # repro/patches/<PATCH_SUBDIR>（a15 / a16）
 
 # ---- A15 profile（LineageOS 22.2 / Android 15）----
 # 仅在选中 a15 子命令、或有 top-android 已建好 lineage-22.2-cannon 分支时使用。
@@ -36,8 +41,25 @@ apply_a15_profile() {
     LUNCH_TARGET="lineage_cannon-bp1a-user"
     LOCAL_MANIFEST_NAME="cannon-22.2.xml"
     APPLY_PATCHES="1"
+    APPLY_SCRIPT="$SRC_DIR/scripts/apply_a15_cannon_patches.sh"
+    PATCH_SUBDIR="a15"
 }
 [ "${PROFILE:-}" = "a15" ] && apply_a15_profile
+
+# ---- A16 profile（LineageOS 23.2 / Android 16，release=bp4a）----
+# 关键差异：A16 的 lunch 需三参（product release variant）。
+# 目标：lunch lineage_cannon bp4a userdebug，local_manifests 用 cannon-23.2.xml，
+#       编译前重放 A16 构建期补丁（apply_a16，幂等）。
+apply_a16_profile() {
+    MANIFEST_BRANCH="lineage-23.2"
+    LUNCH_TARGET="lineage_cannon-bp4a-userdebug"    # 仅用于显示/兼容旧逻辑
+    LUNCH_ARGS=(lineage_cannon bp4a userdebug)      # A16 首轮实际三参 userdebug（build-a16.log:34 证实；发布期再切 user）
+    LOCAL_MANIFEST_NAME="cannon-23.2.xml"
+    APPLY_PATCHES="1"
+    APPLY_SCRIPT="$SRC_DIR/scripts/apply_a16_cannon_patches.sh"
+    PATCH_SUBDIR="a16"
+}
+[ "${PROFILE:-}" = "a16" ] && apply_a16_profile
 
 c_red()  { printf '\033[31m%s\033[0m\n' "$*"; }
 c_grn()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -118,13 +140,14 @@ cmd_sync() {
 
 cmd_apply() {
     if [ "$APPLY_PATCHES" != "1" ]; then
-        c_ylw "非 A15 profile，跳过补丁（A14 不需要）"
+        c_ylw "非补丁 profile，跳过补丁（A14 不需要）"
         return 0
     fi
-    step "应用 A15 构建期补丁（幂等：仓库里已提交的改动会自动跳过）"
-    local script="$SRC_DIR/scripts/apply_a15_cannon_patches.sh"
+    step "应用构建期补丁（幂等：仓库里已提交的改动会自动跳过）"
+    local script="$APPLY_SCRIPT"
+    [ -n "$script" ] || script="$SRC_DIR/scripts/apply_a15_cannon_patches.sh"
     [ -f "$script" ] || die "找不到 $script"
-    CANNON_PATCHDIR="${CANNON_PATCHDIR:-$SRC_DIR/repro/patches/a15}" \
+    CANNON_PATCHDIR="${CANNON_PATCHDIR:-$SRC_DIR/repro/patches/${PATCH_SUBDIR:-a15}}" \
         bash "$script" "$ROM_DIR"
 }
 
@@ -148,7 +171,13 @@ cmd_build() {
 
     # shellcheck disable=SC1091
     source build/envsetup.sh >/dev/null
-    lunch "$LUNCH_TARGET"
+    # A16 的 lunch 需三参（product release variant），已由 apply_a16_profile 写入 LUNCH_ARGS；
+    # A14/A15 用单参 LUNCH_TARGET（三段式单串，旧 lunch 可解析）。
+    if [ "${#LUNCH_ARGS[@]}" -gt 0 ]; then
+        lunch "${LUNCH_ARGS[@]}"
+    else
+        lunch "$LUNCH_TARGET"
+    fi
 
     local start; start=$(date +%s)
     m -j"$JOBS" bacon 2>&1 | tee "$LOG"
@@ -166,5 +195,6 @@ case "${1:-}" in
     build)  cmd_build ;;
     all)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a15)    apply_a15_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
+    a16)    apply_a16_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     *)      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
 esac

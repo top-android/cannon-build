@@ -1,0 +1,15 @@
+diff --git a/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java b/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java
+index 3c3b804..f001e45 100644
+--- a/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java
++++ b/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java
+@@ -335,6 +335,10 @@ public class WifiPickerTracker extends BaseWifiTracker {
+     protected void handleWifiStateChangedAction() {
+         if (getWifiState() == WifiManager.WIFI_STATE_DISABLED) {
+             clearAllWifiEntries();
++        } else {
++            // cannon实验D: 开 WiFi 时从内存 scan 历史(mScanResultUpdater)重绘列表，复刻 A13 语义
++            // （否则开 WiFi 不读缓存 → 必然等一次新全扫 = 冷启动）。MAX_SCAN_AGE 保持 15s 不动。
++            conditionallyUpdateScanResults(true /* lastScanSucceeded */);
+         }
+         updateWifiEntries();
+     }

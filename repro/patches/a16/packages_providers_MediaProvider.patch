@@ -1,0 +1,25 @@
+diff --git a/src/com/android/providers/media/TranscodeHelperImpl.java b/src/com/android/providers/media/TranscodeHelperImpl.java
+index 95de881..81d1cf6 100644
+--- a/src/com/android/providers/media/TranscodeHelperImpl.java
++++ b/src/com/android/providers/media/TranscodeHelperImpl.java
+@@ -300,6 +300,20 @@ public class TranscodeHelperImpl implements TranscodeHelper {
+     }
+ 
+     private boolean hasHDRPlugin() {
++        // cannon (Redmi Note 9T 5G / MT6853T), A12 vendor + Android 14 system:
++        // MediaCodec.createDecoderByType() -> MediaCodecList::getInstance() ->
++        // BpMediaPlayerService::getCodecList() 的 binder 调用在本机永不返回
++        // （A12 vendor 的 media/codec2 服务不应答 A14 客户端）。它在 onCreate 里同步
++        // 跑在 MediaProvider 主线程上，于是进程发布不出 content provider ->
++        // ActivityManager 每 ~15s 以 "failed to complete startup" 杀掉它 ->
++        // vold 的 FUSE 挂载等不到 ExternalStorageServiceImpl 交 fd，15s 超时 ->
++        // /storage/emulated 一直 UNMOUNTABLE（文件 App 看不到目录）。
++        // 本机转码本来也用不了，直接短路。
++        // 关掉：setprop persist.sys.cannon.skip_transcode_probe 0
++        if (SystemProperties.getBoolean("persist.sys.cannon.skip_transcode_probe", true)) {
++            Log.i(TAG, "cannon: skip HDR plugin probe (getCodecList binder hangs on this device)");
++            return false;
++        }
+         MediaCodec decoder = null;
+         boolean hasPlugin = false;
+         try {
