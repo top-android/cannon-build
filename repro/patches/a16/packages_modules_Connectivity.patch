@@ -1,3 +1,37 @@
+diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
+index 2388647..b4d71df 100644
+--- a/bpf/loader/NetBpfLoad.cpp
++++ b/bpf/loader/NetBpfLoad.cpp
+@@ -1620,15 +1620,15 @@ static int doLoad(char** argv, char * const envp[]) {
+     // V bumps the kernel requirement up to 4.19
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel419
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19)) {
+-        ALOGE("Android V requires kernel 4.19.");
+-        return 5;
++        // [CANNON_A16_BPF414] 降级：不 return，让 bpfloader 继续尝试加载 4.14 可用 BPF（学 camellia）
++        ALOGW("Android V requires kernel 4.19 (cannon(A16/4.14): degrade, continue).");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel54
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4)) {
+-        ALOGE("Android 25Q2 requires kernel 5.4.");
+-        return 6;
++        // [CANNON_A16_BPF414] 降级：不 return
++        ALOGW("Android 25Q2 requires kernel 5.4 (cannon(A16/4.14): degrade, continue).");
+     }
+ 
+     // 25Q4 bumps the kernel requirement up to 5.10
+@@ -1858,7 +1858,8 @@ static int doLoad(char** argv, char * const envp[]) {
+             // and thus it should return 0 with errno == ENOENT.
+             ALOGE("bpfGetNextMapId(final %d) returned %d errno %d", mapId, next, errno);
+             if (next || errno != ENOENT) return 35;
+-            if (isAtLeastT || isAtLeastKernelVersion(4, 20)) return 36;
++            // [CANNON_A16_BPF414] 4.14 走下方"禁用 mainline eBPF"的优雅降级(return 0)，不 return 36
++            if (isAtLeastKernelVersion(4, 20)) return 36;
+             // implies Android S with 4.14 or 4.19 kernel
+             ALOGW("Detected kernel with invalid BPF UAPI - disabling mainline use of eBPF.");
+             // leave a flag that we're 'done'
 diff --git a/bpf/loader/netbpfload.33rc b/bpf/loader/netbpfload.33rc
 index eb937dd..6cb1821 100644
 --- a/bpf/loader/netbpfload.33rc
@@ -20,6 +54,65 @@ index a23bd60..3290191 100644
 +    # cannon: BPF 失败不秒重启，改抓日志（A16 debug）
 +    # reboot_on_failure reboot,bpfloader-failed
      override
+diff --git a/bpf/netd/BpfHandler.cpp b/bpf/netd/BpfHandler.cpp
+index 7367ec5..7142767 100644
+--- a/bpf/netd/BpfHandler.cpp
++++ b/bpf/netd/BpfHandler.cpp
+@@ -98,12 +98,15 @@ static Status initPrograms(const char* cg2_path) {
+ 
+     // V bumps the kernel requirement up to 4.19
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19)) {
+-        return Status("V+ platform with kernel version < 4.19.0 is unsupported");
++        // [CANNON_A16_BPF414] 降级：不返回错误，继续 initPrograms→initMaps，
++        // 确保 netd_shared 配置 map 被创建（否则 BpfNetMaps ENOENT 打死 system_server）
++        ALOGW("V+ platform with kernel version < 4.19.0 (cannon(A16/4.14): degrade, continue)");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4)) {
+-        return Status("25Q2+ platform with kernel version < 5.4.0 is unsupported");
++        // [CANNON_A16_BPF414] 降级：不返回错误
++        ALOGW("25Q2+ platform with kernel version < 5.4.0 (cannon(A16/4.14): degrade, continue)");
+     }
+ 
+     unique_fd cg_fd(open(cg2_path, O_DIRECTORY | O_RDONLY | O_CLOEXEC));
+diff --git a/bpf/netd/NetdUpdatable.cpp b/bpf/netd/NetdUpdatable.cpp
+index 3b15916..99bc1f9 100644
+--- a/bpf/netd/NetdUpdatable.cpp
++++ b/bpf/netd/NetdUpdatable.cpp
+@@ -32,7 +32,11 @@ int libnetd_updatable_init(const char* cg2_path) {
+     android::netdutils::Status ret = sBpfHandler.init(cg2_path);
+     if (!android::netdutils::isOk(ret)) {
+         LOG(ERROR) << __func__ << ": Failed: (" << ret.code() << ") " << ret.msg();
+-        abort();
++        // cannon(A16 老 vendor)：本机内核 4.14 < netd(V平台)要求的 4.19，BPF 初始化必失败。
++        // 不 abort，让 netd 跳过 BPF 继续服务——BpfHandler::tagSocket 会因 mCookieTagMap
++        // 无效而安全返回 -EPERM，不会崩。否则 netd 崩溃循环 → zygote/system_server 卡死
++        // → sys.boot_completed 永远到不了 1（A16 黑屏/卡动画根因之一）。
++        return 0;
+     }
+     return 0;
+ }
+diff --git a/service/jni/com_android_server_connectivity_ClatCoordinator.cpp b/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
+index 70991eb..4140937 100644
+--- a/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
++++ b/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
+@@ -132,7 +132,14 @@ static void verifyClatPerms() {
+ 
+ #undef V2
+ 
+-    if (fatal) abort();
++    if (fatal) {
++        // cannon(A16 老 vendor)：本机 kernel 4.14 + bpfloader 未加载 BPF，
++        // /sys/fs/bpf/net_shared/prog_clatd_* / map_clatd_* 不存在 → 校验必失败。
++        // 老 vendor 上新 Android，不应因此 abort 打死 system_server（JNI_OnLoad 里会连锁 → 开机重启）。
++        // 开机优先走降级：仅记日志、跳过校验、继续注册 JNI。
++        ALOGE("cannon: ClatCoordinator perm/BPF verify failed (kernel 4.14, BPF not loaded), "
++              "degrade skip (no abort)");
++    }
+ }
+ 
+ #undef V
 diff --git a/staticlibs/device/com/android/net/module/util/PrivateAddressCoordinator.java b/staticlibs/device/com/android/net/module/util/PrivateAddressCoordinator.java
 index ca26690..3c6fd00 100644
 --- a/staticlibs/device/com/android/net/module/util/PrivateAddressCoordinator.java

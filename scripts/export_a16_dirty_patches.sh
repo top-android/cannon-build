@@ -32,13 +32,14 @@ pairs=(
 "packages/modules/Connectivity:packages_modules_Connectivity" "packages/modules/NetworkStack:packages_modules_NetworkStack"
 "packages/modules/Wifi:packages_modules_Wifi" "packages/providers/MediaProvider:packages_providers_MediaProvider"
 "system/core:system_core" "system/libhidl:system_libhidl" "vendor/lineage:vendor_lineage"
+"kernel/xiaomi/cannon:kernel_xiaomi_cannon" "packages/apps/Launcher3:packages_apps_Launcher3" "vendor/xiaomi/cannon:vendor_xiaomi_cannon"
 )
 
 for e in "${pairs[@]}"; do
   path="${e%%:*}"; name="${e##*:}"; rp="$SRC/$path"
   [ -d "$rp/.git" ] || { echo "SKIP 非git: $path"; continue; }
   pf="$DST/$name.patch"; : > "$pf"
-  git -C "$rp" diff >> "$pf" 2>/dev/null
+  git -C "$rp" diff --binary >> "$pf" 2>/dev/null
   # untracked 新源码（排除备份垃圾、排除 hardware/mediatek 下嵌套 project 的 wlan/）
   while IFS= read -r f; do
     [ -z "$f" ] && continue

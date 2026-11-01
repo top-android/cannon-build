@@ -52,7 +52,9 @@ MAP=(
   "hardware_lineage_compat.patch:hardware/lineage/compat"
   "hardware_mediatek.patch:hardware/mediatek"
   "hardware_mediatek_wlan.patch:hardware/mediatek/wlan"
+  "kernel_xiaomi_cannon.patch:kernel/xiaomi/cannon"
   "packages_apps_Jelly.patch:packages/apps/Jelly"
+  "packages_apps_Launcher3.patch:packages/apps/Launcher3"
   "packages_apps_Settings.patch:packages/apps/Settings"
   "packages_modules_Bluetooth.patch:packages/modules/Bluetooth"
   "packages_modules_Connectivity.patch:packages/modules/Connectivity"
@@ -62,6 +64,7 @@ MAP=(
   "system_core.patch:system/core"
   "system_libhidl.patch:system/libhidl"
   "vendor_lineage.patch:vendor/lineage"
+  "vendor_xiaomi_cannon.patch:vendor/xiaomi/cannon"
 )
 
 APPLIED=0; SKIPPED=0; DRIFT=0; BINARY=0; FAIL=0

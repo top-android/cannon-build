@@ -1,5 +1,5 @@
 diff --git a/core/Makefile b/core/Makefile
-index b8c4189..138af3e 100644
+index b8c4189..329666c 100644
 --- a/core/Makefile
 +++ b/core/Makefile
 @@ -2772,6 +2772,8 @@ $(INTERNAL_RECOVERY_RAMDISK_FILES_TIMESTAMP): $(MKBOOTFS) \
@@ -11,7 +11,38 @@ index b8c4189..138af3e 100644
  	# Modifying ramdisk contents...
  	ln -sf /system/bin/init $(TARGET_RECOVERY_ROOT_OUT)/init
  	# Removes $(TARGET_RECOVERY_ROOT_OUT)/init*.rc EXCEPT init.recovery*.rc.
-@@ -6670,6 +6672,8 @@ ifneq (,$(INSTALLED_RECOVERYIMAGE_TARGET)$(filter true,$(BOARD_USES_RECOVERY_AS_
+@@ -5623,6 +5625,10 @@ endif # ENABLE_UFFD_GC == "default"
+ ifeq ($(PRODUCT_ENFORCE_VINTF_MANIFEST),true)
+ ifeq ($(check_vintf_has_system),true)
+ ifeq ($(check_vintf_has_vendor),true)
++# cannon A16-D14: 设备开启 CANNON_SKIP_VINTF_COMPAT 时，跳过 framework compatibility
++# 检查（旧 vendor HAL 在 FCM v8 被判 deprecated；内核 4.14 低于最低 LTS）。仅跳此检查，
++# 保留 check_vintf_vendor（清单合法性/重复 FqInstance）。
++ifeq ($(strip $(CANNON_SKIP_VINTF_COMPAT))$(filter lineage_cannon,$(TARGET_PRODUCT)),)
+ ifeq ($(filter true,$(BUILDING_ODM_IMAGE)),$(filter true,$(BOARD_USES_ODMIMAGE)))
+ ifeq ($(filter true,$(BUILDING_PRODUCT_IMAGE)),$(filter true,$(BOARD_USES_PRODUCTIMAGE)))
+ ifeq ($(filter true,$(BUILDING_SYSTEM_EXT_IMAGE)),$(filter true,$(BOARD_USES_SYSTEM_EXTIMAGE)))
+@@ -5690,6 +5696,7 @@ check_vintf_compatible_deps :=
+ endif # BUILDING_SYSTEM_EXT_IMAGE equals BOARD_USES_SYSTEM_EXTIMAGE
+ endif # BUILDING_PRODUCT_IMAGE equals BOARD_USES_PRODUCTIMAGE
+ endif # BUILDING_ODM_IMAGE equals BOARD_USES_ODMIMAGE
++endif # CANNON_SKIP_VINTF_COMPAT
+ endif # check_vintf_has_vendor
+ endif # check_vintf_has_system
+ endif # PRODUCT_ENFORCE_VINTF_MANIFEST
+@@ -6213,7 +6220,11 @@ endif # BOARD_USES_PVMFWIMAGE
+ 	$(call dump-dynamic-partitions-info,$@)
+ 	@# VINTF checks
+ ifeq ($(PRODUCT_ENFORCE_VINTF_MANIFEST),true)
++ifneq ($(strip $(CANNON_SKIP_VINTF_COMPAT))$(filter lineage_cannon,$(TARGET_PRODUCT)),)
++# cannon A16-D14: 跳过 OTA/target_files 阶段的 VINTF 兼容性复核（同构建期 check_vintf_compatible）
++else
+ 	$(hide) echo "vintf_enforce=true" >> $@
++endif # CANNON_SKIP_VINTF_COMPAT
+ endif
+ ifdef ODM_MANIFEST_SKUS
+ 	$(hide) echo "vintf_odm_manifest_skus=$(ODM_MANIFEST_SKUS)" >> $@
+@@ -6670,6 +6681,8 @@ ifneq (,$(INSTALLED_RECOVERYIMAGE_TARGET)$(filter true,$(BOARD_USES_RECOVERY_AS_
  ifneq (true,$(BOARD_INCLUDE_RECOVERY_RAMDISK_IN_VENDOR_BOOT))
  	$(hide) $(call package_files-copy-root, \
  	    $(TARGET_RECOVERY_ROOT_OUT),$(zip_root)/$(PRIVATE_RECOVERY_OUT)/RAMDISK)
@@ -20,3 +51,12 @@ index b8c4189..138af3e 100644
  endif
  	@# OTA install helpers
  	$(hide) $(call package_files-copy-root, \
+@@ -6806,6 +6819,8 @@ endif
+ 	$(hide) mkdir -p $(zip_root)/ROOT
+ 	$(hide) $(call package_files-copy-root, \
+ 	    $(TARGET_ROOT_OUT),$(zip_root)/ROOT)
++	@# A16-D15: remove d symlink (points to host /sys/kernel/debug, blocks zip -r)
++	$(hide) rm -f $(zip_root)/ROOT/d
+ else ifdef INSTALLED_BUILD_PROP_TARGET
+ 	@# Copy the system build.prop even if not building a system image
+ 	@# because add_img_to_target_files may need it to build other partition

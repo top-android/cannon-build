@@ -19,6 +19,42 @@ index e2ef800b5..6ffe9a4d2 100644
      /**
       * @hide
       * Does this device have file-based encryption (FBE) enabled?
+diff --git a/packages/SystemUI/src/com/android/systemui/securelockdevice/data/repository/SecureLockDeviceRepository.kt b/packages/SystemUI/src/com/android/systemui/securelockdevice/data/repository/SecureLockDeviceRepository.kt
+index 703430644..1bdb39305 100644
+--- a/packages/SystemUI/src/com/android/systemui/securelockdevice/data/repository/SecureLockDeviceRepository.kt
++++ b/packages/SystemUI/src/com/android/systemui/securelockdevice/data/repository/SecureLockDeviceRepository.kt
+@@ -81,12 +81,26 @@ constructor(
+                     }
+ 
+                 updateSecureLockDeviceEnabledState(false)
+-                authenticationPolicyManager?.registerSecureLockDeviceStatusListener(
+-                    backgroundExecutor,
+-                    listener,
+-                )
++                // cannon(A16/4.14 vendor): MANAGE_SECURE_LOCK_DEVICE is feature-gated by
++                // android.security.secure_lockdown (undefined on this build) while the code gate
++                // secure_lock_device is on, so this binder call throws SecurityException and
++                // crash-loops SystemUI (-> RescueParty requests data wipe). Degrade: swallow it.
++                try {
++                    authenticationPolicyManager?.registerSecureLockDeviceStatusListener(
++                        backgroundExecutor,
++                        listener,
++                    )
++                } catch (e: SecurityException) {
++                    Log.w(TAG, "cannon: registerSecureLockDeviceStatusListener denied, degrade", e)
++                }
+                 awaitClose {
+-                    authenticationPolicyManager?.unregisterSecureLockDeviceStatusListener(listener)
++                    try {
++                        authenticationPolicyManager?.unregisterSecureLockDeviceStatusListener(
++                            listener
++                        )
++                    } catch (e: SecurityException) {
++                        Log.w(TAG, "cannon: unregisterSecureLockDeviceStatusListener denied, degrade", e)
++                    }
+                 }
+             }
+         } else {
 diff --git a/services/core/java/com/android/server/DockObserver.java b/services/core/java/com/android/server/DockObserver.java
 index d2db8f74c..4c2dd8dee 100644
 --- a/services/core/java/com/android/server/DockObserver.java
@@ -101,6 +137,32 @@ index 44b438bfc..5b5a71562 100644
              final String soundPath = Settings.Global.getString(mContext.getContentResolver(),
                      wireless ? Settings.Global.WIRELESS_CHARGING_STARTED_SOUND
                              : Settings.Global.CHARGING_STARTED_SOUND);
+diff --git a/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt b/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
+index 73f1033f3..0adc44b0a 100644
+--- a/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
++++ b/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
+@@ -124,11 +124,16 @@ class AppOpService(private val service: AccessCheckingService) : AppOpsCheckingS
+                 // Multiple ops might map to a single permission but only one is considered the
+                 // runtime appop calculations.
+                 if (appOpCode == AppOpsManager.permissionToOpCode(permissionName)) {
+-                    val permission =
+-                        checkNotNull(permissions[permissionName]) {
+-                            "Missing permission definition for permission \"$permissionName\"" +
+-                                " associated with app op $appOpCode"
+-                        }
++                    // cannon(A16/bp1a)：个别 featureFlag 权限在本 release(bp1a) 未定义、却在
++                    // bp2a/trunk_staging 为 ENABLED → appop 侧启用、权限侧排除，checkNotNull 会
++                    // 打死 system_server。老 vendor/新 Android 不应因此崩溃：降级——跳过该 op。
++                    val permission = permissions[permissionName]
++                    if (permission == null) {
++                        Slog.w("AppOpService",
++                            "cannon: skip app op $appOpCode: permission \"$permissionName\"" +
++                                " not defined (flag mismatch, degrade)")
++                        return@let
++                    }
+                     if (permission.isRuntime) {
+                         runtimePermissionNameToAppOp[permissionName] = appOpCode
+                         runtimeAppOpToPermissionNames[appOpCode] = permissionName
 diff --git a/telephony/java/android/telephony/SubscriptionManager.java b/telephony/java/android/telephony/SubscriptionManager.java
 index 8b926fadb..d7cda8a33 100644
 --- a/telephony/java/android/telephony/SubscriptionManager.java

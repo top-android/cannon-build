@@ -16,6 +16,18 @@ index 7cd03c6..382b387 100644
  			continue
  		}
  		if strings.HasPrefix(f, "system/") {
+diff --git a/scripts/check_boot_jars/package_allowed_list.txt b/scripts/check_boot_jars/package_allowed_list.txt
+index 95fe0b3..724444f 100644
+--- a/scripts/check_boot_jars/package_allowed_list.txt
++++ b/scripts/check_boot_jars/package_allowed_list.txt
+@@ -304,3 +304,7 @@ qcom.fmradio
+ ###################################################
+ # IFAA Manager used for Alipay and/or WeChat payment
+ org\.ifaa\.android\.manager.*
++
++# cannon A16-D12: MTK 原厂 bootclasspath jar 含 vendor.xiaomi.* (e.g. vendor.xiaomi.hardware.misys.V1_0)
++vendor\.xiaomi
++vendor\.xiaomi\..*
 diff --git a/scripts/gen_build_prop.py b/scripts/gen_build_prop.py
 index 04ec410..ad5a19d 100644
 --- a/scripts/gen_build_prop.py

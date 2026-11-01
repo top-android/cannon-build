@@ -86,6 +86,24 @@ index dfc125e..89d42d2 100644
 +// 保留 vendor prebuilt 作为唯一 mediatek-telephony-common。
 +// 说明：hardware/mediatek/frameworks/mediatek-frameworks.mk 未被本产品引入，
 +// 无模块以编译依赖方式引用它，故停用不影响编译图。恢复用 git checkout 本文件。
+diff --git a/packages/PowerOffAlarm/Android.bp b/packages/PowerOffAlarm/Android.bp
+index ffb9fb2..a2cca18 100644
+--- a/packages/PowerOffAlarm/Android.bp
++++ b/packages/PowerOffAlarm/Android.bp
+@@ -35,10 +35,12 @@ cc_library {
+         "-Wall",
+         "-Wextra",
+     ],
++    // A16-D11: 移除 generated_kernel_headers。它把整棵内核 uapi(含 linux/sched/types.h)
++    // 排在 bionic 之前，导致 struct sched_param 与 bionic sched.h 重定义(A16 clang 判 error)。
++    // bionic 自带 linux/ioctl.h 与 linux/rtc.h，本模块无需内核生成头；可逆。
+     header_libs: [
+         "jni_headers",
+         "libbase_headers",
+-        "generated_kernel_headers",
+     ],
+     shared_libs: [
+         "liblog",
 diff --git a/aidl/power-mediatek/Android.bp b/aidl/power-mediatek/Android.bp
 new file mode 100644
 index 0000000..48e56fd

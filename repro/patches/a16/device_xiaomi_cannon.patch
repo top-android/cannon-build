@@ -1,8 +1,39 @@
+diff --git a/configs/vintf/manifest.xml b/configs/vintf/manifest.xml
+index ea12f7d..673802a 100644
+--- a/configs/vintf/manifest.xml
++++ b/configs/vintf/manifest.xml
+@@ -14,6 +14,11 @@
+         <transport>hwbinder</transport>
+         <fqname>@1.1::IBluetoothHci/default</fqname>
+     </hal>
++    <hal format="hidl">
++        <name>android.hardware.camera.provider</name>
++        <transport>hwbinder</transport>
++        <fqname>@2.6::ICameraProvider/internal/0</fqname>
++    </hal>
+     <hal format="hidl">
+         <name>android.hardware.gatekeeper</name>
+         <transport>hwbinder</transport>
 diff --git a/device.mk b/device.mk
-index 168f18b..c8aae41 100644
+index 168f18b..0babf50 100644
 --- a/device.mk
 +++ b/device.mk
-@@ -143,9 +143,11 @@ PRODUCT_PACKAGES += \
+@@ -13,6 +13,14 @@ $(call inherit-product, frameworks/native/build/phone-xhdpi-4096-dalvik-heap.mk)
+ # Project ID Quota
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/emulated_storage.mk)
+ 
++# IMS A12-blob compat: A16 移除了 com.android.internal.telephony.metrics.TelephonyMetrics
++# （改由 MetricsCollector + *Stats 架构），而原厂 com.mediatek.ims(A12 blob) 的
++# ImsRILAdapter/MwiRIL 仍直接引用该类 → 启动即 NoClassDefFoundError、IMS 进程反复崩。
++# hardware/lineage/compat 已提供 telephony-common-stub（同名类 + getInstance/writeRil* 空实现），
++# 这里把 compat.mk 继承进来，使 stub 进 PRODUCT_PACKAGES 且置于 boot classpath，
++# 让 com.mediatek.ims 能在运行期解析到该类。
++$(call inherit-product, hardware/lineage/compat/frameworks/compat.mk)
++
+ # Permissions
+ PRODUCT_COPY_FILES += \
+     frameworks/native/data/etc/android.hardware.audio.low_latency.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.audio.low_latency.xml \
+@@ -143,9 +151,11 @@ PRODUCT_PACKAGES += \
      disable_configstore
  
  # Display
@@ -15,7 +46,7 @@ index 168f18b..c8aae41 100644
  
  PRODUCT_PACKAGES += \
      libfmq \
-@@ -224,12 +226,17 @@ PRODUCT_PACKAGES += \
+@@ -224,12 +234,17 @@ PRODUCT_PACKAGES += \
      libavservices_minijail_vendor
  
  # Vibrator
@@ -35,7 +66,7 @@ index 168f18b..c8aae41 100644
  
  # Neural Networks
  PRODUCT_PACKAGES += \
-@@ -381,9 +388,12 @@ PRODUCT_PACKAGES += \
+@@ -381,9 +396,12 @@ PRODUCT_PACKAGES += \
  PRODUCT_COPY_FILES += \
      $(LOCAL_PATH)/configs/gnss/agps_profiles_conf2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/gnss/agps_profiles_conf2.xml
  
@@ -50,7 +81,7 @@ index 168f18b..c8aae41 100644
  
  # Public libraries
  PRODUCT_COPY_FILES += \
-@@ -401,7 +411,7 @@ PRODUCT_PACKAGES += \
+@@ -401,7 +419,7 @@ PRODUCT_PACKAGES += \
      init.connectivity.rc \
      init.modem.rc \
      init.mt6853.rc \
@@ -59,25 +90,213 @@ index 168f18b..c8aae41 100644
      init.project.rc \
      init.sensor_2_0.rc \
      ueventd.mtk.rc
+@@ -417,6 +435,15 @@ PRODUCT_COMPATIBLE_PROPERTY_OVERRIDE := true
+ # Shipping API level
+ PRODUCT_SHIPPING_API_LEVEL := 34
+ 
++# A16-D14: 老 vendor(A12 blob) 上新 Android。设备服务的旧 HIDL HAL（fingerprint@2.3 /
++# cas@1.2 / drm@1.4 / usb@1.3 / sensors@2.1 ...）在 A16 的 framework compatibility
++# matrix(FCM v8) 里被标为 deprecated，check_vintf_compatible 判为 ERROR("should not be
++# served")；内核 4.14 也低于 FCM 要求的最低 LTS(5.15)。A16 已把
++# PRODUCT_ENFORCE_VINTF_MANIFEST 硬编码 true 且废弃 _OVERRIDE，无法用产品变量关闭。
++# 故由 build/make 侧识别此开关，仅跳过 check_vintf_compatible（保留 check_vintf_vendor
++# 的清单合法性/重复 FqInstance 检查）。A15 当初是整体关闭 VINTF 强制，实测可正常启动。
++CANNON_SKIP_VINTF_COMPAT := true
++
+ # Seccomp policy
+ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/seccomp/android.hardware.media.c2@1.2-extended-seccomp-policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/android.hardware.media.c2@1.2-extended-seccomp-policy \
+@@ -436,12 +463,26 @@ PRODUCT_PACKAGES += \
+     libshim_cpp_verbose_abort \
+     libshim_sensors \
+     libshim_cannon_vendor \
+-    libshim_cannon_system
++    libshim_cannon_system \
++    libnetutils_vendor_dep
+ 
+ # GPS
+ PRODUCT_PACKAGES += \
+     libcurl
+ 
++# cannon A16（老 vendor 上新系统）：SurfaceFlinger / 媒体依赖闭包。
++# A16 已移除 VNDK，下列库是 system 私有库，vendor 命名空间的 SF/Mali/media HAL 找不到它们
++# → libgralloc_extra→libGLES_mali dlopen 失败 → SurfaceFlinger EGL null → SIGSEGV 黑屏。
++# 之前是"手工注入 vendor 镜像"（每次裸 m vendorimage 都会丢 → 黑屏回归）。
++# 这里强制它们参与构建（保证 $(TARGET_OUT) 有产物）；真正拷进 /vendor 由
++#   scripts/a16_assemble_vendor.sh 在 m vendorimage 之后自动完成
++#   （注意：不能在本文件用 PRODUCT_COPY_FILES + $(TARGET_OUT)——解析期 TARGET_OUT 为空，
++#    实测会展开成 /lib64/xxx，无效）。
++PRODUCT_PACKAGES += \
++    libunwindstack \
++    libutilscallstack \
++    liblzma
++
+ # Thermal
+ PRODUCT_PACKAGES += \
+     android.hardware.thermal@1.0-impl \
+diff --git a/extract-files.sh b/extract-files.sh
+index 32ce017..1e3d2f0 100755
+--- a/extract-files.sh
++++ b/extract-files.sh
+@@ -116,6 +116,11 @@ function blob_fixup() {
+     vendor/bin/hw/android.hardware.media.c2@1.2-mediatek)
+         "${PATCHELF}" --add-needed "libstagefright_foundation-v33.so" "${2}"
+         ;;
++    # A16 media.c2 经 libcodec2_vndk 要 android::GraphicBufferMapper::lock(旧签名)，
++    # A16 libui 已删；device 树 libshim_cannon_vendor.so 定义了它 → 烤进 NEEDED。
++    vendor/lib/libcodec2_vndk.so|vendor/lib64/libcodec2_vndk.so)
++        "${PATCHELF}" --add-needed "libshim_cannon_vendor.so" "${2}"
++        ;;
+     vendor/etc/init/vendor.mediatek.hardware.mtkpower@1.0-service.rc)
+         echo "$(cat ${2}) input" > "${2}"
+         ;;
+diff --git a/libshims/Android.bp b/libshims/Android.bp
+index c365e16..b9f8918 100644
+--- a/libshims/Android.bp
++++ b/libshims/Android.bp
+@@ -104,3 +104,21 @@ cc_library_shared {
+     ],
+     compile_multilib: "64",
+ }
++
++// 2026-11-01 A16：把 libnetutils 的 vendor 变体拉进 /vendor/lib64
++//
++// /vendor/bin/hw/tetheroffloadservice（A12 vendor blob）ELF NEEDED libnetutils.so，
++// 但 A16 重建 vendor 时没把它放进 /vendor/lib64（proprietary-files.txt 亦未登记）→
++// linker "library libnetutils.so not found" → HAL 起不来 → Tethering 无限等待
++// android.hardware.tetheroffload.config@1.0::IOffloadConfig/default（每次 1s 重试）→
++// startTethering 卡死 → 设置里开热点 ANR。
++//
++// 本模块本身是空壳，仅靠 shared_libs 依赖把 vendor_available:true 的 libnetutils
++// 以 vendor 变体编出来并装到 /vendor/lib64（顺带 /vendor/lib）。不改任何 blob。
++cc_library_shared {
++    name: "libnetutils_vendor_dep",
++    vendor: true,
++    srcs: ["src/netutils_dep_stub.c"],
++    shared_libs: ["libnetutils"],
++    compile_multilib: "both",
++}
+diff --git a/libshims/src/netutils_dep_stub.c b/libshims/src/netutils_dep_stub.c
+new file mode 100644
+index 0000000..54e3dcd
+--- /dev/null
++++ b/libshims/src/netutils_dep_stub.c
+@@ -0,0 +1,8 @@
++// Intentionally trivial. This file exists only so that a vendor:true cc_library_shared
++// (libnetutils_vendor_dep) has at least one source, and via its shared_libs dependency
++// pulls the vendor variant of libnetutils into /vendor/lib64.
++//
++// Why: /vendor/bin/hw/tetheroffloadservice (A12 blob) has NEEDED libnetutils.so, but the
++// A16 vendor rebuild dropped it. Without it the HAL fails to link, never registers, and
++// Tethering blocks forever waiting for IOffloadConfig -> Settings ANR when enabling hotspot.
++void libnetutils_vendor_dep_anchor(void) {}
+diff --git a/overlay/packages/apps/CarrierConfig/res/xml/vendor.xml b/overlay/packages/apps/CarrierConfig/res/xml/vendor.xml
+index 046ab90..9d90a21 100644
+--- a/overlay/packages/apps/CarrierConfig/res/xml/vendor.xml
++++ b/overlay/packages/apps/CarrierConfig/res/xml/vendor.xml
+@@ -34,4 +34,19 @@ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.-->
+     <carrier_config gid1="6230" mcc="310" mnc="240">
+         <boolean name="mtk_key_roaming_bar_guard_bool" value="true"/>
+     </carrier_config>
++
++    <!-- VoLTE 使能（2026-11-02 修 A16 纯 LTE 冷启 IMS 不注册）。
++         ★关键根因：本 ROM 的 DefaultCarrierConfigService.checkFilters() 对 mnc 只做单值 equals
++         （src:308 `value.equals(id.getMnc())`），**不支持逗号列表**——旧写法 mnc="01,06,09"
++         会拿整串去和 SIM 的 "06" 比 → 永远 false → 整个 carrier_config 块被判不匹配而丢弃，
++         于是 carrier_volte_available_bool 根本没生效（dumpsys 一直 false）。
++         ★修法：只按 mcc="460"（中国大陆）匹配。checkFilters 只检查 XML 里已写出的属性，
++         不写 mnc 即对所有 460 SIM 生效，一网打尽移动/联通/电信，彻底绕开 mnc 逗号 bug。
++         另补 provisioned=true，让框架认为 VoLTE 已开通，真正触发 IMS PDN/VoLTE 语音能力。 -->
++    <carrier_config mcc="460">
++        <boolean name="carrier_volte_available_bool" value="true"/>
++        <boolean name="carrier_vt_available_bool" value="true"/>
++        <boolean name="carrier_volte_provisioned_bool" value="true"/>
++        <boolean name="carrier_volte_provisioning_required_bool" value="false"/>
++    </carrier_config>
+ </carrier_config_list>
+\ No newline at end of file
 diff --git a/rootdir/Android.bp b/rootdir/Android.bp
-index b189e78..103eb1a 100644
+index b189e78..65e2c38 100644
 --- a/rootdir/Android.bp
 +++ b/rootdir/Android.bp
-@@ -26,8 +26,11 @@ prebuilt_etc {
+@@ -26,8 +26,15 @@ prebuilt_etc {
      vendor: true,
  }
  
-+// USB：module 名加 .cannon 以避开 hardware/mediatek 经 target_board_platform
-+// 自动生成的同名 module（init.%s.usb.rc → init.mt6853.usb.rc），安装文件名保持原名。
++// USB：A16 hardware/mediatek 会用 target_board_platform_prebuilt_etc 把 MTK 通用版
++// init.mediatek.usb.rc 装成同一目标路径 /vendor/etc/init/hw/init.mt6853.usb.rc（439 行，
++// 不含 setprop config adb，靠 USB gadget HAL），顶掉 device 树这份（1009 行，on post-fs
++// 自设 configfs=1 + config=adb → 开机自动 adb）。
++// 干净修法：把 device 树这份装成唯一文件名 init.mt6853.usb.cannon.rc，并在 init.mt6853.rc
++// 里把它 import 进来；MTK 通用版虽仍装到 init.mt6853.usb.rc 但无人 import、不执行。
  prebuilt_etc {
 -    name: "init.mt6853.usb.rc",
 +    name: "init.mt6853.usb.cannon.rc",
-+    filename: "init.mt6853.usb.rc",
++    filename: "init.mt6853.usb.cannon.rc",
      src: "etc/init.mt6853.usb.rc",
      sub_dir: "init/hw",
      vendor: true,
+diff --git a/rootdir/etc/init.mt6853.rc b/rootdir/etc/init.mt6853.rc
+index 4c1a700..5f595ca 100644
+--- a/rootdir/etc/init.mt6853.rc
++++ b/rootdir/etc/init.mt6853.rc
+@@ -4,7 +4,7 @@
+ #
+ 
+ import /vendor/etc/init/hw/init.connectivity.rc
+-import /vendor/etc/init/hw/init.mt6853.usb.rc
++import /vendor/etc/init/hw/init.mt6853.usb.cannon.rc
+ import /vendor/etc/init/hw/init.project.rc
+ import /vendor/etc/init/hw/init.sensor_2_0.rc
+ import /vendor/etc/init/hw/init.cannon.rc
+diff --git a/rootdir/etc/init.mt6853.usb.rc b/rootdir/etc/init.mt6853.usb.rc
+index 4428adf..c20eed7 100644
+--- a/rootdir/etc/init.mt6853.usb.rc
++++ b/rootdir/etc/init.mt6853.usb.rc
+@@ -48,9 +48,19 @@ on post-fs
+     mount functionfs mtp /dev/usb-ffs/mtp rmode=0770,fmode=0660,uid=1024,gid=1024,no_disconnect=1
+     mount functionfs ptp /dev/usb-ffs/ptp rmode=0770,fmode=0660,uid=1024,gid=1024,no_disconnect=1
+ 
++# A16 old-vendor：framework/HAL 无法在运行时把 sys.usb.config 选成 adb（A12 HIDL usb HAL
++# 驱动不了 A16 framework）。在 post-fs-data（/data 已挂、persist 可写、且早于 boot 触发）
++# 落 persist 默认 adb，供 init.usb.rc 的 `on boot && property:persist.sys.usb.config=*`
++# 读回 → setprop sys.usb.config adb → init.usb.configfs.rc:17 `start adbd`。
++# 这是声明式恢复默认，非运行时探针服务。
++on post-fs-data
++    setprop persist.sys.usb.config adb
++
+ on boot
+     setprop sys.usb.configfs 1
+     setprop sys.usb.ffs.aio_compat 0
++    # 直接推 configfs 选 adb（与上面 post-fs-data 的 persist 双保险，不依赖 init.usb.rc 时序）
++    setprop sys.usb.config adb
+     setprop vendor.usb.controller "musb-hdrc"
+     setprop vendor.usb.acm_cnt 0
+     setprop vendor.usb.acm_port0 ""
+@@ -118,7 +128,7 @@ on charger
+     setprop sys.usb.config adb
+ 
+ on property:dev.bootcomplete=1
+-    write /config/usb_gadget/g1/strings/0x409/product ${ro.product.marketname}
++    write /config/usb_gadget/g1/strings/0x409/product ${ro.product.model}
+ 
+ 
+ ### more command at init.usb.configfs.rc ###
+diff --git a/sepolicy/private/cannon_finalize.te b/sepolicy/private/cannon_finalize.te
+new file mode 100644
+index 0000000..8f19c22
+--- /dev/null
++++ b/sepolicy/private/cannon_finalize.te
+@@ -0,0 +1,7 @@
++# cannon A16 enforcing 收尾（apply_a16_enforcing_avc_finalize.sh 维护，勿手改）。
++# init 在 enforcing 下 ptrace 自身（capability=19）。AOSP domain.te neverallow
++#   neverallow { domain -vold -dumpstate -system_server ... } self:global_capability_class_set sys_ptrace;
++# 例外列表不含 init => 不能 allow（会编不过）。该操作无害（enforcing 已能开机），
++# 用 dontaudit 仅消除 audit 噪声（dontaudit 不受 neverallow 约束）。
++
++dontaudit init self:capability sys_ptrace;
 diff --git a/sepolicy/vendor/file_contexts b/sepolicy/vendor/file_contexts
-index cf2dcf8..9e5ee0d 100644
+index cf2dcf8..b1d7139 100644
 --- a/sepolicy/vendor/file_contexts
 +++ b/sepolicy/vendor/file_contexts
 @@ -16,8 +16,6 @@
@@ -89,3 +308,15 @@ index cf2dcf8..9e5ee0d 100644
  /vendor/bin/hw/vendor\.nxp\.hardware\.nfc@1\.2-service         u:object_r:hal_nfc_default_exec:s0
  
  # Lights
+@@ -48,3 +46,11 @@
+ # → mapper dlopen 失败 → "gralloc-mapper is missing" → SF SIGABRT → 卡第一屏(D1)。
+ # 与 mapper impl 同标签即可被同一批允许读 same_process_hal_file 的进程读取。
+ /(vendor|system/vendor)/lib(64)?/libshim_cpp_verbose_abort\.so   u:object_r:same_process_hal_file:s0
++
++# A16 补丁 vendor 库（a16_assemble_vendor.sh 从 system 暂存区注入）——EGL/gralloc 依赖链
++# surfaceflinger/zygote 经 libGLES_meow.so → libGLES_mali.so → libgralloc_extra.so 这条链在
++# sphal 命名空间直接 dlopen libutilscallstack / libunwindstack / liblzma，必须标 same_process_hal_file。
++# 【注意】这三条的 same_process_hal_file 标签已由上游 system/sepolicy/vendor/file_contexts
++# （205/208/210 行）声明，此处不得再重复声明——重复会在合并 file_contexts.device.tmp 时报
++# "Multiple same specifications for ...libutilscallstack/.so" 导致 m systemimage 失败。
++# 注入脚本 a16_assemble_vendor.sh 里 inject() 的 chcon 标签仍须保持 same_process_hal_file。

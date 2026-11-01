@@ -51,13 +51,16 @@ apply_a15_profile() {
 
 # ---- A16 profile（LineageOS 23.2 / Android 16，release=bp4a）----
 # 关键差异：A16 的 lunch 需三参（product release variant）。
-# 目标：lunch lineage_cannon bp4a userdebug，local_manifests 用 cannon-23.2.xml，
+# 目标：lunch lineage_cannon bp4a user（发布变体），local_manifests 用 cannon-a16.xml
+#       （5 自有仓 lineage-23.2-cannon 双轨 + 上游 + build-time 补丁），
 #       编译前重放 A16 构建期补丁（apply_a16，幂等）。
+# 变体默认 user（正式发布）；调试期可 CANNON_VARIANT=userdebug ./build.sh a16 覆盖。
 apply_a16_profile() {
     MANIFEST_BRANCH="lineage-23.2"
-    LUNCH_TARGET="lineage_cannon-bp4a-userdebug"    # 仅用于显示/兼容旧逻辑
-    LUNCH_ARGS=(lineage_cannon bp4a userdebug)      # A16 首轮实际三参 userdebug（build-a16.log:34 证实；发布期再切 user）
-    LOCAL_MANIFEST_NAME="cannon-23.2.xml"
+    local variant="${CANNON_VARIANT:-user}"
+    LUNCH_TARGET="lineage_cannon-bp4a-${variant}"   # 仅用于显示/兼容旧逻辑
+    LUNCH_ARGS=(lineage_cannon bp4a "$variant")     # A16 三参：product release variant
+    LOCAL_MANIFEST_NAME="cannon-a16.xml"
     APPLY_PATCHES="1"
     APPLY_SCRIPT="$SRC_DIR/scripts/apply_a16_cannon_patches.sh"
     PATCH_SUBDIR="a16"
