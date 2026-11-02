@@ -26,7 +26,7 @@
 | 仓库 | 补丁文件 | tracked 变更 | 新增源码文件 |
 |---|---|---|---|
 | `art` | art.patch | 1 file, +5/−4 | — |
-| `build/make` | build_make.patch | 1 file, +15 | — |
+| `build/make` | build_make.patch | 1 file, +28（含 OTA vendor 复用白名单镜像 + `__DATA` map 修复，2026-11-02 刷新） | — |
 | `build/soong` | build_soong.patch | 3 files, +12/−13 | — |
 | `frameworks/base` | frameworks_base.patch | 8 files, +92/−11 | — |
 | `frameworks/native` | frameworks_native.patch | 1 file, +12/−2 | — |

@@ -60,6 +60,21 @@ cd cannon-build
 > 选 `a15`/`a16`（或 `PROFILE=a15`/`PROFILE=a16`）会覆盖 `MANIFEST_BRANCH` / `LOCAL_MANIFEST_NAME` / `LUNCH_TARGET`
 > 并切换到对应的编译前补丁；不选就是 A14 默认（同样会 apply_a14 补丁）。A16 的 lunch 走三参（`lineage_cannon bp4a userdebug`）。
 
+### A16 build/make 补丁（单轨，非 top-android 仓；编译前需确保已打）
+
+`build/make` 属 AOSP 上游仓，其 **OTA vendor 修复**（`BOARD_CANNON_VENDOR_PREASSEMBLE` 钩子；OTA 打包时复用白名单 `vendor.img` 到 `IMAGES/` + 生成 `__DATA` map，避免 `add_img_to_target_files::AddVendor` 无过滤重建导致 OTA vendor 与 target 不一致、sideload 卡开机）只以补丁快照存在：`repro/patches/a16/build_make.patch`。该补丁已在 `scripts/apply_a16_cannon_patches.sh`（`build_make.patch:build/make`），`./build.sh a16` 会自动应用。
+
+若绕过 `./build.sh a16`、直接 `lunch lineage_cannon bp4a user && m bacon` 编译，先手动打这一次（幂等）：
+
+```bash
+# 全量 A16 补丁（推荐，含 build/make）
+bash scripts/apply_a16_cannon_patches.sh /cannon/rom-a16
+# 或只单打 build/make 这一条：
+git -C /cannon/rom-a16/build/make apply "$PWD/repro/patches/a16/build_make.patch"
+```
+
+> ⚠️ 前提：`repro/patches/a16/build_make.patch` 必须是最新快照（含上面的 OTA vendor 修复）。若它落后于源码树的实际改动，先按 `scripts/export_a16_dirty_patches.sh` 重导，再 apply。
+
 ## 前置条件
 
 - 内存 + swap ≥ 40G（34G 内存跑 `-j8 bacon` 是刚好够）
