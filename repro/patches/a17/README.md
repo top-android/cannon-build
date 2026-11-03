@@ -1,7 +1,10 @@
 # repro/patches/a17 —— A17(LOS 24.0 / android-17.0.0_r1) 构建期补丁
 
-由 A16 补丁（`repro/patches/a16/`）在 A17 源码上逐条评估/重定位而来。共 **16 个补丁**，
-`scripts/apply_a17_cannon_patches.sh` 幂等重放（已应用会自动跳过）。
+由 A16 补丁（`repro/patches/a16/`）在 A17 源码上逐条评估/重定位而来，并叠加 A17 阶段新增补丁。
+**当前共 22 个补丁**（截至 2026-11-03，以本目录实际 `.patch` 为准，见下分类），
+`scripts/apply_a17_cannon_patches.sh` 幂等重放（已应用会自动跳过）。A17 阶段新增的主要是：
+`device_xiaomi_cannon`（mediatek 移出 PRODUCT_BOOT_JARS）、`hardware_nxp_secure_element`、
+`packages_modules_Wifi`，以及 **[五]** 节 3 个 `vendor_lineage_*` 内核头 sbox 链补丁。
 
 ## 一、直接复用（11，A16 原样在 A17 可打）
 art, frameworks_base, frameworks_native, hardware_lineage_compat, hardware_mediatek,
@@ -22,9 +25,12 @@ packages_modules_NetworkStack, packages_providers_MediaProvider, system_core
 - system_libhidl：A17 已删除 getRawServiceInternal 内调试 `sleep(1)`
 - vendor_lineage：A17 已整段删除 arm gcc kernel toolchain（仅 clang）
 
-## 四、5 自有仓（device/vendor/kernel/wlan/Wifi）基线已含
-它们 A17 分支内容 == A16 tip，A16 补丁本就在分支里，故**不产 a17 patch**。
-device 的 file_contexts 反向 check 差 1 hunk 是因分支比导出快照更新（多了 a16_preassemble 声明），非缺陷。
+## 四、5 自有仓（device/vendor/kernel/wlan/Wifi）
+- 多数情况 A17 分支内容 == A16 tip，A16 补丁本就在分支里，故**不产 a17 patch**。
+- **例外（A17 新改，产补丁）**：
+  - `device_xiaomi_cannon.patch`：A17 把 8 个 mediatek vendor jar 移出 `PRODUCT_BOOT_JARS`（治 dex2oat boot image 校验因 `final`/删除类而硬失败；仍装 /system/framework）。
+  - `packages_modules_Wifi.patch`、`hardware_nxp_secure_element.patch`：见各自补丁头注释。
+- device 的 file_contexts 反向 check 差 1 hunk 是因分支比导出快照更新（多了 a16_preassemble 声明），非缺陷。
 
 ## 五、A17 4.14 非GKI 内核头 sbox 链（3 补丁，全部 vendor/lineage）—— 坑王链，全新编译必打
 
