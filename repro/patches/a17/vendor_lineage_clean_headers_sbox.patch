@@ -1,0 +1,33 @@
+diff --git a/tools/clean_headers.sh b/tools/clean_headers.sh
+index 3a12160..178fd5b 100755
+--- a/tools/clean_headers.sh
++++ b/tools/clean_headers.sh
+@@ -3,7 +3,27 @@ set -eu
+ 
+ export ANDROID_BUILD_TOP="$PWD"
+ 
+-./bionic/libc/kernel/tools/clean_header.py -u \
++# [cannon][A17] generated_kernel_includes 的 make headers_install 在 sbox 沙箱（真 chroot）内执行，
++# 沙箱只含 kernel dep_files + tool_files，没有 bionic/。此脚本原本假定 cwd=AOSP 根、可直接调
++# ./bionic/libc/kernel/tools/clean_header.py；在沙箱内该路径不存在 → exit 127 使整条 rule 失败。
++# 由于 `make headers_install` 已由 scripts/Makefile.headersinst 做过 UAPI 清洗（去 __KERNEL__ 等），
++# clean_header.py 只是 Android 侧额外的小清洗，跳过不影响用户态编译。故：找得到就清洗，找不到就优雅跳过。
++CLEAN_HEADER=""
++for cand in \
++    "./bionic/libc/kernel/tools/clean_header.py" \
++    "${ANDROID_BUILD_TOP}/bionic/libc/kernel/tools/clean_header.py"; do
++    if [ -f "$cand" ]; then
++        CLEAN_HEADER="$cand"
++        break
++    fi
++done
++
++if [ -z "$CLEAN_HEADER" ]; then
++    echo "clean_headers.sh: clean_header.py not found (sbox/chroot without bionic); skip header post-clean for $1" >&2
++    exit 0
++fi
++
++python3 "$CLEAN_HEADER" -u \
+     "$1/usr/include/asm/signal.h" \
+     "$1/usr/include/asm-generic/signal.h" \
+     "$1/usr/include/linux/eventpoll.h"

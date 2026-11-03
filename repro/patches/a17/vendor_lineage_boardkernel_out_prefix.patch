@@ -1,0 +1,21 @@
+diff --git a/config/BoardConfigKernel.mk b/config/BoardConfigKernel.mk
+index 66f10f0..631eeed 100644
+--- a/config/BoardConfigKernel.mk
++++ b/config/BoardConfigKernel.mk
+@@ -215,12 +215,10 @@ ifneq ($(TARGET_KERNEL_ADDITIONAL_FLAGS),)
+ endif
+ 
+ # Set the out dir for the kernel's O= arg
+-# This needs to be an absolute path, so only set this if the standard out dir isn't used
+-OUT_DIR_PREFIX := $(shell echo $(OUT_DIR) | sed -e 's|/target/.*$$||g')
+-KERNEL_BUILD_OUT_PREFIX :=
+-ifeq ($(OUT_DIR_PREFIX),out)
+-    KERNEL_BUILD_OUT_PREFIX := $(BUILD_TOP)/
+-endif
++# [cannon][A17] O= 必须绝对：否则 sbox 内 make -C kernel 会把头文件装进嵌套路径(沙箱输入区)被丢弃，
++# 致 generated_kernel_includes 的 gen/usr/include 为空、-nostdlibinc 消费者全崩。
++# 无条件用 BUILD_TOP 前缀（stock OUT_DIR=out 结果不变），使任意 OUT_DIR 名(out-a17 等)均等价 stock。
++KERNEL_BUILD_OUT_PREFIX := $(BUILD_TOP)/
+ 
+ ifneq ($(TARGET_KERNEL_PLATFORM_TARGET),)
+ KERNEL_PATH := $(abspath $(BUILD_TOP)/kernel/platform/kernel-$(TARGET_KERNEL_VERSION))

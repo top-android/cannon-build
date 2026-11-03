@@ -71,6 +71,10 @@ MAP=(
   "system_core.patch:system/core"
   "system_libhidl.patch:system/libhidl"
   "vendor_lineage.patch:vendor/lineage"
+  # A17 4.14 非GKI 内核头 sbox 链三补丁（同一 repo/lineage，分文件独立 apply）：
+  "vendor_lineage_kernel_headers_sbox.patch:vendor/lineage"     # Android.bp dep_files 补 scripts/**+arch Makefile
+  "vendor_lineage_clean_headers_sbox.patch:vendor/lineage"      # clean_headers.sh 在 sbox(无bionic) 优雅跳过
+  "vendor_lineage_boardkernel_out_prefix.patch:vendor/lineage"  # BoardConfigKernel.mk O= 无条件绝对(治头被沙箱丢弃)
   "vendor_xiaomi_cannon.patch:vendor/xiaomi/cannon"
 )
 
