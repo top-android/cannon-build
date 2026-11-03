@@ -47,6 +47,7 @@ fi
 
 # 补丁文件名 -> 仓库相对路径（新增 A17 补丁后按需要在此登记）
 MAP=(
+  "art.patch:art"
   "build_make.patch:build/make"
   "build_soong.patch:build/soong"
   "device_xiaomi_cannon.patch:device/xiaomi/cannon"
