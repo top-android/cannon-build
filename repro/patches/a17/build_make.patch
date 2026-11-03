@@ -1,0 +1,89 @@
+diff --git a/core/Makefile b/core/Makefile
+index 65c45cb..ab0dbce 100644
+--- a/core/Makefile
++++ b/core/Makefile
+@@ -2758,6 +2758,8 @@ $(INTERNAL_RECOVERY_RAMDISK_FILES_TIMESTAMP): $(MKBOOTFS) \
+ 	# Copying baseline ramdisk...
+ 	# Use rsync because "cp -Rf" fails to overwrite broken symlinks on Mac.
+ 	rsync -a --exclude=sdcard $(IGNORE_RECOVERY_SEPOLICY) $(IGNORE_CACHE_LINK) $(TARGET_ROOT_OUT) $(TARGET_RECOVERY_OUT)
++	# Remove d symlink (points to host /sys/kernel/debug, breaks zip)
++	rm -f $(TARGET_RECOVERY_ROOT_OUT)/d
+ 	# Modifying ramdisk contents...
+ 	ln -sf /system/bin/init $(TARGET_RECOVERY_ROOT_OUT)/init
+ 	# Removes $(TARGET_RECOVERY_ROOT_OUT)/init*.rc EXCEPT init.recovery*.rc.
+@@ -4217,6 +4219,7 @@ define build-vendorimage-target
+   @mkdir -p $(TARGET_OUT_VENDOR)
+   @mkdir -p $(vendorimage_intermediates) && rm -rf $(vendorimage_intermediates)/vendor_image_info.txt
+   $(call generate-image-prop-dictionary, $(vendorimage_intermediates)/vendor_image_info.txt,vendor,skip_fsck=true)
++  $(if $(BOARD_CANNON_VENDOR_PREASSEMBLE),$(hide) OUT_DIR=$(OUT_DIR) PRODUCT_OUT=$(PRODUCT_OUT) $(BOARD_CANNON_VENDOR_PREASSEMBLE) $(vendorimage_intermediates)/file_list.txt || { echo "ERROR: cannon vendor preassemble failed"; exit 1; })
+   PATH=$(INTERNAL_USERIMAGES_BINARY_PATHS):$$PATH \
+       $(BUILD_IMAGE) \
+           $(if $(BUILD_BROKEN_INCORRECT_PARTITION_IMAGES),,--input-directory-filter-file $(vendorimage_intermediates)/file_list.txt) \
+@@ -5711,6 +5714,10 @@ endif # ENABLE_UFFD_GC == "default"
+ # Skip partial builds; only check full builds. Only check if:
+ # - system / vendor VINTF metadata exists
+ # - Building product / system_ext / odm images if board has product / system_ext / odm images
++# cannon A16-D14(relocate A17): 设备开启 CANNON_SKIP_VINTF_COMPAT 时，跳过 framework compatibility
++# 检查（旧 vendor HAL 在 FCM v8 被判 deprecated；内核 4.14 低于最低 LTS）。仅跳此检查，
++# 保留 check_vintf_vendor（清单合法性/重复 FqInstance）。
++ifeq ($(strip $(CANNON_SKIP_VINTF_COMPAT))$(filter lineage_cannon,$(TARGET_PRODUCT)),)
+ ifeq ($(check_vintf_has_system),true)
+ ifeq ($(check_vintf_has_vendor),true)
+ ifeq ($(filter true,$(BUILDING_ODM_IMAGE)),$(filter true,$(BOARD_USES_ODMIMAGE)))
+@@ -5782,6 +5789,7 @@ endif # BUILDING_PRODUCT_IMAGE equals BOARD_USES_PRODUCTIMAGE
+ endif # BUILDING_ODM_IMAGE equals BOARD_USES_ODMIMAGE
+ endif # check_vintf_has_vendor
+ endif # check_vintf_has_system
++endif # CANNON_SKIP_VINTF_COMPAT
+ 
+ # Add all logs of VINTF checks to dist builds
+ droid_targets: $(check_vintf_all_deps)
+@@ -6300,7 +6308,11 @@ endif # BOARD_AVB_ENABLE
+ endif # BOARD_USES_PVMFWIMAGE
+ 	$(call dump-dynamic-partitions-info,$@)
+ 	@# VINTF checks
++ifneq ($(strip $(CANNON_SKIP_VINTF_COMPAT))$(filter lineage_cannon,$(TARGET_PRODUCT)),)
++# cannon A16-D14(relocate A17): 跳过 OTA/target_files 阶段的 VINTF 兼容性复核（同构建期 check_vintf_compatible）
++else
+ 	$(hide) echo "vintf_enforce=true" >> $@
++endif # CANNON_SKIP_VINTF_COMPAT
+ ifdef ODM_MANIFEST_SKUS
+ 	$(hide) echo "vintf_odm_manifest_skus=$(ODM_MANIFEST_SKUS)" >> $@
+ endif
+@@ -6759,6 +6771,8 @@ ifneq (,$(INSTALLED_RECOVERYIMAGE_TARGET)$(filter true,$(BOARD_USES_RECOVERY_AS_
+ ifneq (true,$(BOARD_INCLUDE_RECOVERY_RAMDISK_IN_VENDOR_BOOT))
+ 	$(hide) $(call package_files-copy-root, \
+ 	    $(TARGET_RECOVERY_ROOT_OUT),$(zip_root)/$(PRIVATE_RECOVERY_OUT)/RAMDISK)
++	# Remove d symlink (points to host /sys/kernel/debug, breaks zip)
++	$(hide) rm -f $(zip_root)/$(PRIVATE_RECOVERY_OUT)/RAMDISK/d
+ endif
+ 	@# OTA install helpers
+ 	$(hide) $(call package_files-copy-root, \
+@@ -6895,6 +6909,8 @@ endif
+ 	$(hide) mkdir -p $(zip_root)/ROOT
+ 	$(hide) $(call package_files-copy-root, \
+ 	    $(TARGET_ROOT_OUT),$(zip_root)/ROOT)
++	@# A16-D15: remove d symlink (points to host /sys/kernel/debug, blocks zip -r)
++	$(hide) rm -f $(zip_root)/ROOT/d
+ else ifdef INSTALLED_BUILD_PROP_TARGET
+ 	@# Copy the system build.prop even if not building a system image
+ 	@# because add_img_to_target_files may need it to build other partition
+@@ -7044,6 +7060,18 @@ endif
+ ifdef BOARD_PREBUILT_VENDORIMAGE
+ 	$(hide) mkdir -p $(zip_root)/IMAGES
+ 	$(hide) cp $(INSTALLED_VENDORIMAGE_TARGET) $(zip_root)/IMAGES/
++else ifdef INSTALLED_VENDORIMAGE_TARGET
++	@# cannon A16: 复用 build_image 白名单(--input-directory-filter-file file_list.txt)
++	@# 过滤后的 vendor.img（=已验开机镜像），不交给 add_img_to_target_files::AddVendor
++	@# 从 VENDOR/ staging 无过滤重建（否则会多打 41 个 staging 残留文件 → OTA vendor 与
++	@# target vendor 不一致 → sideload 卡开机）。同时补生成 vendor.map 供 care_map 使用。
++	$(hide) mkdir -p $(zip_root)/IMAGES
++	$(hide) cp $(INSTALLED_VENDORIMAGE_TARGET) $(zip_root)/IMAGES/
++	@# 全量 OTA 不需要逐文件 map：写一条 __DATA(取本镜像自身 care_map，整分区 diff) 即可，
++	@# BlockImageDiff 按整块处理；且 __DATA 不以 '/' 开头，GetSparseImage 会跳过逐文件 zip 条目校验。
++	@# 不能用 map_file_generator：其输出是分区内相对路径(/foo)，与 target_files zip 条目(VENDOR/foo)
++	@# 对不上，且含目录条目与 <free-space> 空闲区 → LoadFileBlockMap/GetSparseImage 报 AssertionError。
++	$(hide) python3 -c 'import sys; sys.path.insert(0,"build/make/tools/releasetools"); import sparse_img; open(sys.argv[2],"w").write("__DATA "+str(sparse_img.SparseImage(sys.argv[1]).care_map)+"\n")' $(INSTALLED_VENDORIMAGE_TARGET) $(zip_root)/IMAGES/vendor.map
+ endif
+ ifdef BOARD_PREBUILT_PRODUCTIMAGE
+ 	$(hide) mkdir -p $(zip_root)/IMAGES

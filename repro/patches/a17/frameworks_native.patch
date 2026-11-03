@@ -1,0 +1,25 @@
+diff --git a/libs/binder/ProcessState.cpp b/libs/binder/ProcessState.cpp
+index f7d5347..76bc94e 100644
+--- a/libs/binder/ProcessState.cpp
++++ b/libs/binder/ProcessState.cpp
+@@ -449,8 +449,18 @@ void ProcessState::spawnPooledThread(bool isMain)
+ }
+ 
+ status_t ProcessState::setThreadPoolMaxThreadCount(size_t maxThreads) {
+-    LOG_ALWAYS_FATAL_IF(mThreadPoolStarted && maxThreads < mMaxThreads,
+-           "Binder threadpool cannot be shrunk after starting");
++    // [mtk414-vendor-compat] 老 vendor HAL（原厂 A12 blob，例如
++    // android.hardware.audio.service）会在 startThreadPool() 之后调用
++    // setThreadPoolMaxThreadCount(0)。AOSP 在这里加了 LOG_ALWAYS_FATAL，
++    // 会导致该 HAL 直接 abort、init 每 5s 重启一次，进而把 system_server
++    // 卡在 AudioService 构造里开不了机。对老 blob 做兼容：不 abort，
++    // 忽略"缩小"请求（保留原线程数），仅告警。
++    if (mThreadPoolStarted && maxThreads < mMaxThreads) {
++        ALOGW("Binder threadpool cannot be shrunk after starting "
++              "(requested %zu, current %zu); ignoring for vendor compat",
++              maxThreads, mMaxThreads.load());
++        return NO_ERROR;
++    }
+     status_t result = NO_ERROR;
+     if (ioctl(mDriverFD, BINDER_SET_MAX_THREADS, &maxThreads) != -1) {
+         mMaxThreads = maxThreads;
