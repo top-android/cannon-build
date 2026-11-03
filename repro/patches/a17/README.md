@@ -1,12 +1,13 @@
 # repro/patches/a17 —— A17(LOS 24.0 / android-17.0.0_r1) 构建期补丁
 
 由 A16 补丁（`repro/patches/a16/`）在 A17 源码上逐条评估/重定位而来，并叠加 A17 阶段新增补丁。
-**当前共 25 个补丁**（截至 2026-11-03，以本目录实际 `.patch` 为准，见下分类），
+**当前共 24 个补丁**（截至 2026-11-03，以本目录实际 `.patch` 为准，见下分类），
 `scripts/apply_a17_cannon_patches.sh` 幂等重放（已应用会自动跳过）。A17 阶段新增的主要是：
-`device_xiaomi_cannon`（mediatek 移出 PRODUCT_BOOT_JARS + 定义 KERNEL_CROSS_COMPILE）、
+`device_xiaomi_cannon`（mediatek 移出 PRODUCT_BOOT_JARS + 定义 KERNEL_CROSS_COMPILE + 用产品变量关 vendor dex_import 的 dexpreopt）、
 `kernel_xiaomi_cannon`（4.14 内核适配 clang-21/Android17 工具链漂移）、
-`hardware_mediatek_wlan`（BITS 掩码修正）、`vendor_xiaomi_cannon`（13 个 mediatek dex_import 关 dex_preopt）、
+`hardware_mediatek_wlan`（BITS 掩码修正）、
 `hardware_nxp_secure_element`、`packages_modules_Wifi`，以及 **[五]** 节 3 个 `vendor_lineage_*` 内核头 sbox 链补丁。
+> `vendor/xiaomi/cannon` 仓 A17 期**无净改动、无补丁**（曾用非法 `dex_import` 属性试关 dexpreopt 已撤销，正确做法在 device.mk 产品变量）。
 
 ## 一、直接复用（11，A16 原样在 A17 可打）
 art, frameworks_base, frameworks_native, hardware_lineage_compat, hardware_mediatek,
@@ -30,10 +31,10 @@ packages_modules_NetworkStack, packages_providers_MediaProvider, system_core
 ## 四、5 自有仓（device/vendor/kernel/wlan/Wifi）
 - 多数情况 A17 分支内容 == A16 tip，A16 补丁本就在分支里，故**不产 a17 patch**。
 - **例外（A17 新改，产补丁）**：
-  - `device_xiaomi_cannon.patch`：① A17 把 8 个 mediatek vendor jar 移出 `PRODUCT_BOOT_JARS`（治 dex2oat boot image 校验因 `final`/删除类而硬失败；仍装 /system/framework）；② `BoardConfig.mk` 定义 `KERNEL_CROSS_COMPILE := CROSS_COMPILE=aarch64-linux-gnu-`（本 Lineage 树 kernel.mk 引用该变量但未定义，空值使 clang 无 `--target`，vDSO 退化 host x86_64 报 `-ffixed-x18 unsupported`；必须用 gnu 三元组，android 三元组会触发 `clang-android.sh` 的 `__ANDROID__` 报错）。
+  - `device_xiaomi_cannon.patch`：① A17 把 8 个 mediatek vendor jar 移出 `PRODUCT_BOOT_JARS`（治 dex2oat boot image 校验因 `final`/删除类而硬失败；仍装 /system/framework）；② `BoardConfig.mk` 定义 `KERNEL_CROSS_COMPILE := CROSS_COMPILE=aarch64-linux-gnu-`（本 Lineage 树 kernel.mk 引用该变量但未定义，空值使 clang 无 `--target`，vDSO 退化 host x86_64 报 `-ffixed-x18 unsupported`；必须用 gnu 三元组，android 三元组会触发 `clang-android.sh` 的 `__ANDROID__` 报错）；③ `device.mk` 用官方产品变量 `$(call add-product-dex-preopt-module-config, <13个模块>, disable)` 把 13 个 vendor `dex_import`（mediatek-* 11 + `com.nxp.sems` + `hotword`）置入 `DEXPREOPT_DISABLED_MODULES`（→ `DisablePreoptModules` → `build/soong/dexpreopt/dexpreopt.go:122` 按模块名跳 dex2oat）。**这是关 vendor blob dexpreopt 的正解**：`dex_import` 模块类型不支持 `dex_preopt` 属性（blueprint 报 `unrecognized property "dex_preopt.enabled"`），故只能走产品变量。dumpvar 已验证 13 模块名全部进 `DEXPREOPT_DISABLED_MODULES`。
   - `kernel_xiaomi_cannon.patch`：4.14 非 GKI 内核在 clang-21/Android17 工具链下的 5 处漂移修复——`cannon_defconfig` 关 `CONFIG_COMPAT_VDSO`（无 32 位工具链）、`scripts/extract-cert.c` 对 BoringSSL 桩掉 PKCS#11 ENGINE、`asm/spinlock.h` `"I"→"i"`(65536 超 12 位)、`asm/stack_pointer.h` 全局寄存器变量改语句表达式宏、顶层 `Makefile` 加 `-Wno-default-const-init-var-unsafe`。
   - `hardware_mediatek_wlan.patch`：`mediatek_driver_cmd_nl80211.c` BITS 掩码修正。
-  - `vendor_xiaomi_cannon.patch`：13 个 `mediatek-*` 等 vendor `dex_import` 加 `dex_preopt: { enabled: false }`。A17 telephony/framework 重构（多类 final/删除）致 vendor blob 在 dex2oat 硬验证失败（首个 `MtkGsmMmiCode extends final GsmMmiCode`）；移出 `PRODUCT_BOOT_JARS` 只挡 boot image，这些 `dex_import` 仍被单独 dexpreopt → 逐个关掉（运行期仍可用，仅首次加载稍慢）。治第3轮k `mediatek-telephony-common` dexpreopt FAILED。
+  - ~~`vendor_xiaomi_cannon.patch`~~：**已删除**。曾在 vendor `Android.bp` 给 13 个 `dex_import` 加 `dex_preopt: { enabled: false }`，但该属性对 `dex_import` 非法（blueprint `unrecognized property`），第3轮l 秒失败。已撤销该提交（vendor 仓回基线 c6dafbc，无净改动），改由 device.mk 产品变量实现，故不再有 vendor 补丁。
   - `packages_modules_Wifi.patch`、`hardware_nxp_secure_element.patch`：见各自补丁头注释。
 - device 的 file_contexts 反向 check 差 1 hunk 是因分支比导出快照更新（多了 a16_preassemble 声明），非缺陷。
 

@@ -2,7 +2,7 @@
 
 > 源码树 `/cannon/rom-a17`（LineageOS 24.0 / Android 17 / `lineage-24.0-cannon` / bp1a）。
 > 详细背景与分类说明见同目录 `README.md`。本文件只做**逐补丁清单**（文件名 / 大小 / 目标 / 基线 / 来源）。
-> 截至 2026-11-03，共 **25** 个 `.patch`。`scripts/apply_a17_cannon_patches.sh` 幂等重放（缺省按文件名顺序）。
+> 截至 2026-11-03，共 **24** 个 `.patch`。`scripts/apply_a17_cannon_patches.sh` 幂等重放（缺省按文件名顺序）。
 
 ## 一、自有仓（top-android 组织内）——**双轨：本地 commit 入库 + 含二进制 patch**
 
@@ -11,10 +11,11 @@
 
 | 补丁 | 大小 | 仓库 | 基线 → HEAD | 变更摘要 |
 |---|---|---|---|---|
-| device_xiaomi_cannon.patch | 3913 | device/xiaomi/cannon | `36af3c7` → `3853b8f` | 2 files：`device.mk`(mediatek vendor jar 移出 PRODUCT_BOOT_JARS)+`BoardConfig.mk`(KERNEL_CROSS_COMPILE=gnu 三元组，治 vDSO 退化 x86_64) |
+| device_xiaomi_cannon.patch | 5134 | device/xiaomi/cannon | `36af3c7` → `cb7f630` | 2 files：`BoardConfig.mk`(KERNEL_CROSS_COMPILE=gnu 三元组，治 vDSO 退化 x86_64) + `device.mk`(mediatek vendor jar 移出 PRODUCT_BOOT_JARS；用 `add-product-dex-preopt-module-config(...=disable)` 把 13 个 vendor `dex_import` 置入 `DEXPREOPT_DISABLED_MODULES`，按模块名跳 dex2oat) |
 | kernel_xiaomi_cannon.patch | 3924 | kernel/xiaomi/cannon | `215867a3d` → `cf7bd8d54` | 5 files：`cannon_defconfig`(关 COMPAT_VDSO)、`scripts/extract-cert.c`(BoringSSL 桩)、`asm/spinlock.h`(I→i)、`asm/stack_pointer.h`(sp 宏)、`Makefile`(-Wno-default-const-init-var-unsafe) |
 | hardware_mediatek_wlan.patch | 717 | hardware/mediatek/wlan | `b042dac` → `3a37b5b` | 1 file：`mediatek_driver_cmd_nl80211.c` BITS 掩码修正 |
-| vendor_xiaomi_cannon.patch | 2555 | vendor/xiaomi/cannon | `c6dafbc` → `3a595ba` | 1 file：`Android.bp` 13 个 `dex_import` 加 `dex_preopt:{enabled:false}`（治 A17 vendor blob dex2oat 硬验证失败）|
+
+> 注：`vendor/xiaomi/cannon` 仓 A17 期无净改动（曾试 `dex_import` 加 `dex_preopt` 属性属非法，已撤销；正确的 dexpreopt 关闭在 device.mk 产品变量中），故无 vendor 补丁。
 | packages_modules_Wifi.patch | 6119 | packages/modules/Wifi | 见补丁头 | 老 vendor getFeatureSet/getWakeReason 空指针旁路 |
 
 ## 二、AOSP 上游仓——**单轨：上游 + build-time apply patch（不 commit 入库）**
