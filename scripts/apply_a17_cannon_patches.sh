@@ -57,6 +57,7 @@ MAP=(
   "frameworks_opt_telephony.patch:frameworks/opt/telephony"
   "hardware_lineage_compat.patch:hardware/lineage/compat"
   "hardware_mediatek.patch:hardware/mediatek"
+  "hardware_nxp_secure_element.patch:hardware/nxp/secure_element"
   "hardware_mediatek_wlan.patch:hardware/mediatek/wlan"
   "kernel_xiaomi_cannon.patch:kernel/xiaomi/cannon"
   "packages_apps_Jelly.patch:packages/apps/Jelly"

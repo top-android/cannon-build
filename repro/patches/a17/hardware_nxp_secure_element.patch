@@ -1,0 +1,15 @@
+diff --git a/frameworks/sems/Android.bp b/frameworks/sems/Android.bp
+index f2f034e..687f580 100644
+--- a/frameworks/sems/Android.bp
++++ b/frameworks/sems/Android.bp
+@@ -25,7 +25,9 @@ prebuilt_etc {
+ 
+ java_library {
+ 
+-    name: "com.nxp.sems",
++    // [cannon][A17] 改名以避开与 vendor/xiaomi/cannon 预编译 dex_import
++    // "com.nxp.sems"(soc_specific) 的同名跨分区冲突；本源码库 enabled:false 从未启用。
++    name: "com.nxp.sems.src.legacy",
+     installable: true,
+     enabled: false,
+     sdk_version: "29",
