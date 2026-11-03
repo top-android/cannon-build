@@ -7,12 +7,17 @@
 
 > 这类仓由我们自有，改动**直接 commit 进仓**（本地分支 `lineage-23.2-cannon`，未 push），
 > 干净 checkout 即当前态；**同时**导出 `git diff --binary`（含 `.so` 二进制内容）的完整 patch，
-> 可 apply 到别处/给别人。**5 仓**均已回验「干净 HEAD~1 + patch == 当前工作树」**完全一致**。
-> 详见 `docs/logs/2026-11-01-a16-selfrepos-commit-and-patch-dualtrack.md`。
+> 可 apply 到别处/给别人。
+> **[2026-11-03 重整]** 发现 device 仓两处存档各存了**不同提交**的快照、互相缺失
+> （build 仓存 `8ad0eb3`=最旧；log 仓存 `b440ee0`+`36af3c7`），且 sepolicy `36af3c7`
+> 单补丁从未登记进 `apply_a16` 的 MAP（从未重放）。现改为**累计补丁**：
+> `device_xiaomi_cannon.patch = git diff --binary 1627c00 36af3c7`（A15 基线 1627c00 → A16 HEAD 36af3c7），
+> 单文件即涵盖全部 A16 device 改动，两仓逐字节一致。回验：干净 `1627c00` + 本 patch == `36af3c7` 工作树。
+> commit 链：`1627c00`(A15设备树) → `8ad0eb3`(device修复入库) → `b440ee0`(vendor一步装配staging预注入) → `36af3c7`(sepolicy补回stash误清, HEAD)。
 
 | 仓库 | commit | 补丁文件 | 大小 | 变更摘要 |
 |---|---|---|---|---|
-| `device/xiaomi/cannon` | `8ad0eb3` | device_xiaomi_cannon.patch | 16KB | 11 files, +134/−12（含 netutils_dep_stub.c、cannon_finalize.te 新增） |
+| `device/xiaomi/cannon` | `1627c00..36af3c7`（累计） | device_xiaomi_cannon.patch | 47KB | 17 files, +616/−12（含 `libshims/src/netutils_dep_stub.c`、`sepolicy/private/cannon_finalize.te`、`cannon_a16_residual.te`、`tools/a16_assemble_vendor.sh`、`a16_preassemble_vendor.sh`、`device.mk`、`configs/vintf/manifest.xml`、`rootdir/*`、`sepolicy/vendor/{vendor_init,hal_fingerprint_default}.te`、`file_contexts`）|
 | `vendor/xiaomi/cannon` | `c6dafbc` | vendor_xiaomi_cannon.patch | 103KB | 5 files，4 个 `.so` **含二进制内容**（libhidlbase×2/libutils/libexpat） |
 | `hardware/mediatek/wlan` | `b042dac` | hardware_mediatek_wlan.patch | 63KB | 11 files, +1246/−3（全新 libwifi-hal-wrapper/wlan_assistant 源码模块） |
 | `packages/modules/Wifi` | `4eb8d97` | packages_modules_Wifi.patch | 6KB | 2 files, +28/−39（老 vendor getFeatureSet/getWakeReason 空指针旁路） |
