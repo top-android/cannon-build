@@ -1,0 +1,59 @@
+diff -ruN '--exclude=.git' up/android_hardware_mediatek_wlan/Android.bp orph/android_hardware_mediatek_wlan/Android.bp
+--- up/android_hardware_mediatek_wlan/Android.bp	1970-01-01 00:00:00.000000000 +0000
++++ orph/android_hardware_mediatek_wlan/Android.bp	2026-10-31 07:16:02.234177427 +0000
+@@ -0,0 +1,8 @@
++// Fix: provide the libwifi-hal-mediatek cc_defaults expected by
++// frameworks/opt/net/wifi/libwifi_hal/Android.bp (MediaTek config).
++// The real static library is libwifi-hal-mt66xx defined in wifi_hal/Android.bp
++
++cc_defaults {
++    name: "libwifi-hal-mediatek",
++    whole_static_libs: ["libwifi-hal-mt66xx"],
++}
+diff -ruN '--exclude=.git' up/android_hardware_mediatek_wlan/wifi_hal/Android.bp orph/android_hardware_mediatek_wlan/wifi_hal/Android.bp
+--- up/android_hardware_mediatek_wlan/wifi_hal/Android.bp	1970-01-01 00:00:00.000000000 +0000
++++ orph/android_hardware_mediatek_wlan/wifi_hal/Android.bp	2026-10-31 07:16:02.234177427 +0000
+@@ -0,0 +1,31 @@
++// Fix: define libwifi-hal-mt66xx in Android.bp so soong bootstrap can see it
++// (it was only declared in Android.mk, which soong bootstrap does not read).
++
++cc_library_static {
++    name: "libwifi-hal-mt66xx",
++    proprietary: true,
++    owner: "mtk",
++    srcs: [
++        "wifi_hal.cpp",
++        "common.cpp",
++        "cpp_bindings.cpp",
++        "wifi_logger.cpp",
++        "wifi_offload.cpp",
++    ],
++    cflags: [
++        "-Wno-unused-parameter",
++        "-Wno-int-to-pointer-cast",
++        "-Wno-maybe-uninitialized",
++        "-Wno-parentheses",
++    ],
++    cppflags: ["-Wno-conversion-null"],
++    include_dirs: [
++        "external/libnl/include",
++        "external/wpa_supplicant_8/src/drivers",
++        "hardware/libhardware_legacy/include/hardware_legacy",
++    ],
++    shared_libs: [
++        "libutils",
++        "liblog",
++    ],
++}
+diff -ruN '--exclude=.git' up/android_hardware_mediatek_wlan/wifi_hal/Android.mk orph/android_hardware_mediatek_wlan/wifi_hal/Android.mk
+--- up/android_hardware_mediatek_wlan/wifi_hal/Android.mk	2026-10-31 07:15:58.411006588 +0000
++++ orph/android_hardware_mediatek_wlan/wifi_hal/Android.mk	2026-10-31 07:16:02.234177427 +0000
+@@ -41,7 +41,7 @@
+ 	wifi_offload.cpp
+ 
+ LOCAL_SHARED_LIBRARIES += libutils liblog
+-LOCAL_MODULE := libwifi-hal-mt66xx
++LOCAL_MODULE := libwifi-hal-mt66xx-legacy
+ LOCAL_PROPRIETARY_MODULE := true
+ LOCAL_MODULE_OWNER := mtk
+ 
