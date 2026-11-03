@@ -1,10 +1,12 @@
 # repro/patches/a17 —— A17(LOS 24.0 / android-17.0.0_r1) 构建期补丁
 
 由 A16 补丁（`repro/patches/a16/`）在 A17 源码上逐条评估/重定位而来，并叠加 A17 阶段新增补丁。
-**当前共 22 个补丁**（截至 2026-11-03，以本目录实际 `.patch` 为准，见下分类），
+**当前共 25 个补丁**（截至 2026-11-03，以本目录实际 `.patch` 为准，见下分类），
 `scripts/apply_a17_cannon_patches.sh` 幂等重放（已应用会自动跳过）。A17 阶段新增的主要是：
-`device_xiaomi_cannon`（mediatek 移出 PRODUCT_BOOT_JARS）、`hardware_nxp_secure_element`、
-`packages_modules_Wifi`，以及 **[五]** 节 3 个 `vendor_lineage_*` 内核头 sbox 链补丁。
+`device_xiaomi_cannon`（mediatek 移出 PRODUCT_BOOT_JARS + 定义 KERNEL_CROSS_COMPILE）、
+`kernel_xiaomi_cannon`（4.14 内核适配 clang-21/Android17 工具链漂移）、
+`hardware_mediatek_wlan`（BITS 掩码修正）、`vendor_xiaomi_cannon`（13 个 mediatek dex_import 关 dex_preopt）、
+`hardware_nxp_secure_element`、`packages_modules_Wifi`，以及 **[五]** 节 3 个 `vendor_lineage_*` 内核头 sbox 链补丁。
 
 ## 一、直接复用（11，A16 原样在 A17 可打）
 art, frameworks_base, frameworks_native, hardware_lineage_compat, hardware_mediatek,
@@ -28,7 +30,10 @@ packages_modules_NetworkStack, packages_providers_MediaProvider, system_core
 ## 四、5 自有仓（device/vendor/kernel/wlan/Wifi）
 - 多数情况 A17 分支内容 == A16 tip，A16 补丁本就在分支里，故**不产 a17 patch**。
 - **例外（A17 新改，产补丁）**：
-  - `device_xiaomi_cannon.patch`：A17 把 8 个 mediatek vendor jar 移出 `PRODUCT_BOOT_JARS`（治 dex2oat boot image 校验因 `final`/删除类而硬失败；仍装 /system/framework）。
+  - `device_xiaomi_cannon.patch`：① A17 把 8 个 mediatek vendor jar 移出 `PRODUCT_BOOT_JARS`（治 dex2oat boot image 校验因 `final`/删除类而硬失败；仍装 /system/framework）；② `BoardConfig.mk` 定义 `KERNEL_CROSS_COMPILE := CROSS_COMPILE=aarch64-linux-gnu-`（本 Lineage 树 kernel.mk 引用该变量但未定义，空值使 clang 无 `--target`，vDSO 退化 host x86_64 报 `-ffixed-x18 unsupported`；必须用 gnu 三元组，android 三元组会触发 `clang-android.sh` 的 `__ANDROID__` 报错）。
+  - `kernel_xiaomi_cannon.patch`：4.14 非 GKI 内核在 clang-21/Android17 工具链下的 5 处漂移修复——`cannon_defconfig` 关 `CONFIG_COMPAT_VDSO`（无 32 位工具链）、`scripts/extract-cert.c` 对 BoringSSL 桩掉 PKCS#11 ENGINE、`asm/spinlock.h` `"I"→"i"`(65536 超 12 位)、`asm/stack_pointer.h` 全局寄存器变量改语句表达式宏、顶层 `Makefile` 加 `-Wno-default-const-init-var-unsafe`。
+  - `hardware_mediatek_wlan.patch`：`mediatek_driver_cmd_nl80211.c` BITS 掩码修正。
+  - `vendor_xiaomi_cannon.patch`：13 个 `mediatek-*` 等 vendor `dex_import` 加 `dex_preopt: { enabled: false }`。A17 telephony/framework 重构（多类 final/删除）致 vendor blob 在 dex2oat 硬验证失败（首个 `MtkGsmMmiCode extends final GsmMmiCode`）；移出 `PRODUCT_BOOT_JARS` 只挡 boot image，这些 `dex_import` 仍被单独 dexpreopt → 逐个关掉（运行期仍可用，仅首次加载稍慢）。治第3轮k `mediatek-telephony-common` dexpreopt FAILED。
   - `packages_modules_Wifi.patch`、`hardware_nxp_secure_element.patch`：见各自补丁头注释。
 - device 的 file_contexts 反向 check 差 1 hunk 是因分支比导出快照更新（多了 a16_preassemble 声明），非缺陷。
 
@@ -43,9 +48,10 @@ packages_modules_NetworkStack, packages_providers_MediaProvider, system_core
 |---|---|---|
 | `vendor_lineage_kernel_headers_sbox.patch` | sbox 内 `make` 报 `scripts/Makefile.ubsan: No such file` exit 127 | Android.bp `generated_kernel_includes.dep_files` 补 `scripts/**/*` + `arch/$(KERNEL_ARCH)/Makefile` |
 | `vendor_lineage_clean_headers_sbox.patch` | 收尾 `clean_headers.sh` 调 `./bionic/.../clean_header.py` 报 127（sbox 无 bionic/） | 脚本找不到 clean_header.py 就优雅 `exit 0` 跳过 |
-| `vendor_lineage_boardkernel_out_prefix.patch` | `.dummy_dep` 成功但真实 `gen/usr/include` **为空** → 500+ `-nostdlibinc` 消费者全崩 | `BoardConfigKernel.mk` 的 `KERNEL_BUILD_OUT_PREFIX` 改**无条件 `$(BUILD_TOP)/`**（stock `out` 不变；`out-a17` 等任意名均安全）|
+| `vendor_lineage_kernel_o_abspath.patch` | `.dummy_dep` 成功但真实 `gen/usr/include` **为空** → 500+ `-nostdlibinc` 消费者全崩 | `build/tasks/kernel.mk` 三处 `O=$(KERNEL_BUILD_OUT_PREFIX)...` 改为 **`O=$(abspath $(KERNEL_BUILD_OUT_PREFIX)...)`**，强制绝对路径（`out-a17` 等任意 OUT_DIR 名均安全）|
 
 - **第三坑为何关键**：`OUT_DIR=out-a17`（siso 要求相对 OUT_DIR）≠ `out` → 原逻辑 `KERNEL_BUILD_OUT_PREFIX` 为空 → `O=` 相对 → sbox 内 `make -C kernel` 把头装进**嵌套沙箱路径被丢弃**。前两补丁只让 make 跑通，第三个才让头落到真实 `gen/`。
-- **持久性**：第三补丁是正解；**不要**再靠"临时改 `out-a17/.../generator.sbox.textproto` 的 `O=` 为绝对"（下次 soong 重分析会重生成 manifest 覆盖它）。
+- **为何改 kernel.mk 而非 BoardConfigKernel.mk（18万步教训）**：改 `config/BoardConfigKernel.mk` 的 `KERNEL_BUILD_OUT_PREFIX` 为无条件绝对虽也能修（且 stock `out` 不受影响），但它是**全局生成规则**，一动会把整片原生子图判脏、重编十余万步（曾白烧 ~18万步 ≈5h）。而 `build/tasks/kernel.mk` 只影响内核相关 edge → 外科手术式修复，不重脏原生图。**故当前采用 kernel.mk abspath 方案**；`BoardConfigKernel.mk` 无条件化作为"干净树从零编"时可选根治（`[待做]`，须在开编前、非增量期落地）。
+- **持久性**：改 kernel.mk 是源码级正解——soong 每次重分析都从该规则重新生成 manifest，`O=` 恒为绝对，**不会**被覆盖；**不要**再靠"临时改 `out-a17/.../generator.sbox.textproto` 的 `O=`"（那是下次重分析即失效的临时兜底）。
 - **编译前自检**：`bash /cannon/scripts/preflight_a17_patches.sh`（查本表三补丁 + OUT_DIR 相对是否就位，不 PASS 阻止开编）；结果核验：`bash /cannon/scripts/verify_a17_result.sh`。
 - **与 OUT_DIR 关系（别误判）**：只有第三坑与"自定义 OUT_DIR 名"有关；第一、二坑是 sbox 缺文件，**用默认 `out` 也会撞**。故**不要**为躲坑改回树内 `out` 或软链 `out`→`out-a17`（siso 对符号链接路径解析有风险）。

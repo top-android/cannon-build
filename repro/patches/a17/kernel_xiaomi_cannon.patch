@@ -1,0 +1,101 @@
+diff --git a/Makefile b/Makefile
+index 3a1bc746c..48c65ed61 100644
+--- a/Makefile
++++ b/Makefile
+@@ -995,6 +995,10 @@ KBUILD_CFLAGS   += $(call cc-option,-Werror=incompatible-pointer-types)
+ # Require designated initializers for all marked structures
+ KBUILD_CFLAGS   += $(call cc-option,-Werror=designated-init)
+ KBUILD_CFLAGS += -Wno-int-conversion -Wno-strict-prototypes -Wno-single-bit-bitfield-constant-conversion
++# Newer clang flags const objects declared without an initializer (e.g. the
++# typecheck() idiom inside u64_to_user_ptr() when passed a 'const u64').
++# Vendor/mediatek code trips this; suppress it when supported.
++KBUILD_CFLAGS += $(call cc-option,-Wno-default-const-init-var-unsafe)
+ 
+ # change __FILE__ to the relative path from the srctree
+ KBUILD_CFLAGS	+= $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
+diff --git a/arch/arm64/configs/cannon_defconfig b/arch/arm64/configs/cannon_defconfig
+index e9b97331a..298c770a8 100644
+--- a/arch/arm64/configs/cannon_defconfig
++++ b/arch/arm64/configs/cannon_defconfig
+@@ -64,7 +64,7 @@ CONFIG_CMDLINE="androidboot.selinux=permissive"
+ # CONFIG_EFI is not set
+ # CONFIG_CORE_DUMP_DEFAULT_ELF_HEADERS is not set
+ CONFIG_COMPAT=y
+-CONFIG_COMPAT_VDSO=y
++# CONFIG_COMPAT_VDSO is not set
+ CONFIG_PM_DEBUG=y
+ CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+ CONFIG_CPU_IDLE_GOV_TEO=y
+diff --git a/arch/arm64/include/asm/spinlock.h b/arch/arm64/include/asm/spinlock.h
+index 82375b896..149361ede 100644
+--- a/arch/arm64/include/asm/spinlock.h
++++ b/arch/arm64/include/asm/spinlock.h
+@@ -64,7 +64,7 @@ static inline void arch_spin_lock(arch_spinlock_t *lock)
+ 	/* We got the lock. Critical section starts here. */
+ "3:"
+ 	: "=&r" (lockval), "=&r" (newval), "=&r" (tmp), "+Q" (*lock)
+-	: "Q" (lock->owner), "I" (1 << TICKET_SHIFT)
++	: "Q" (lock->owner), "i" (1 << TICKET_SHIFT)
+ 	: "memory");
+ }
+ 
+@@ -93,7 +93,7 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
+ 	"	eor	%w1, %w1, %w0\n"
+ 	"1:")
+ 	: "=&r" (lockval), "=&r" (tmp), "+Q" (*lock)
+-	: "I" (1 << TICKET_SHIFT)
++	: "i" (1 << TICKET_SHIFT)
+ 	: "memory");
+ 
+ 	return !tmp;
+diff --git a/arch/arm64/include/asm/stack_pointer.h b/arch/arm64/include/asm/stack_pointer.h
+index 8e57c96ad..98ea4edb7 100644
+--- a/arch/arm64/include/asm/stack_pointer.h
++++ b/arch/arm64/include/asm/stack_pointer.h
+@@ -4,7 +4,16 @@
+ 
+ /*
+  * how to get the current stack pointer from C
++ *
++ * Newer clang rejects "register ... asm(\"sp\")" global register variables
++ * ("register 'sp' unsuitable for global register variables on this target").
++ * Read sp through a small inline-asm statement expression instead; this keeps
++ * the existing value-style call sites (no parentheses) working unchanged.
+  */
+-register unsigned long current_stack_pointer asm ("sp");
++#define current_stack_pointer ({ \
++	unsigned long __cur_sp; \
++	asm volatile("mov %0, sp" : "=r" (__cur_sp)); \
++	__cur_sp; \
++})
+ 
+ #endif /* __ASM_STACK_POINTER_H */
+diff --git a/scripts/extract-cert.c b/scripts/extract-cert.c
+index dd1a4bd70..618151c8a 100644
+--- a/scripts/extract-cert.c
++++ b/scripts/extract-cert.c
+@@ -119,6 +119,16 @@ int main(int argc, char **argv)
+ 		fclose(f);
+ 		exit(0);
+ 	} else if (!strncmp(cert_src, "pkcs11:", 7)) {
++#ifdef OPENSSL_IS_BORINGSSL
++		/*
++		 * AOSP host toolchain ships BoringSSL, which does not implement the
++		 * OpenSSL ENGINE / PKCS#11 API (ENGINE_by_id, ENGINE_init,
++		 * ENGINE_ctrl_cmd*, ...). Our builds never use a pkcs11: URI
++		 * (CONFIG_SYSTEM_TRUSTED_KEYS is empty), so stub this path out so
++		 * extract-cert still compiles against BoringSSL.
++		 */
++		ERR(1, "PKCS#11 extraction not supported with BoringSSL");
++#else
+ 		ENGINE *e;
+ 		struct {
+ 			const char *cert_id;
+@@ -141,6 +151,7 @@ int main(int argc, char **argv)
+ 		ENGINE_ctrl_cmd(e, "LOAD_CERT_CTRL", 0, &parms, NULL, 1);
+ 		ERR(!parms.cert, "Get X.509 from PKCS#11");
+ 		write_cert(parms.cert);
++#endif
+ 	} else {
+ 		BIO *b;
+ 		X509 *x509;
