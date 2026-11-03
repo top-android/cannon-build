@@ -1,4 +1,4 @@
-# top-android / cannon — LineageOS 21 / 22.2 / 23.2 构建
+# top-android / cannon — LineageOS 21 / 22.2 / 23.2 / 24.0 构建
 
 Xiaomi Redmi Note 9T 5G（`cannon` / `cannong`，MT6853T）在 A12 厂商底座上的构建入口。
 支持两套目标：
@@ -6,6 +6,7 @@ Xiaomi Redmi Note 9T 5G（`cannon` / `cannong`，MT6853T）在 A12 厂商底座�
 - **A14 / LineageOS 21**（默认，`lineage_cannon-ap2a-userdebug`）
 - **A15 / LineageOS 22.2**（`lineage_cannon-bp1a-user`，已适配完成并发布）
 - **A16 / LineageOS 23.2**（`lineage_cannon bp4a userdebug`，Android 16；**lunch 需三参** product/release/variant）
+- **A17 / LineageOS 24.0**（Android 17；**lunch 亦三参** product/release/variant，release 代号待确认，默认 `bp5a`，可用 `CANNON_RELEASE=<code>` 覆盖）
 
 目标：**clone 这一个仓库 → 一条 `./build.sh` 命令 → 出包**，不再依赖任何本机手工 sed。
 
@@ -25,6 +26,9 @@ cd cannon-build
 
 # A16：LineageOS 23.2 / Android 16（release=bp4a，lunch 三参 lineage_cannon bp4a userdebug）
 ./build.sh a16       # init(lineage-23.2) + sync + apply A16 补丁(幂等) + build
+
+# A17：LineageOS 24.0 / Android 17（init -b lineage-24.0，local_manifests=cannon-a17.xml）
+./build.sh a17       # init(lineage-24.0) + sync + apply A17 补丁(幂等；基线阶段无补丁自动跳过) + build
 ```
 
 `a15`/`a16` 与 `all` 的差别只是切几个变量；**A14 与 A15/A16 一样，都是「上游 + build-time 补丁」**（原 top-android 快照仓已删）：
@@ -37,6 +41,13 @@ cd cannon-build
 | 编译前补丁 | `apply_a14_cannon_patches.sh`（幂等，`repro/patches/a14_orphan/`，11 仓） | `apply_a15_cannon_patches.sh`（幂等） | `apply_a16_cannon_patches.sh`（幂等） |
 
 也可用环境变量临时切：`PROFILE=a15 ./build.sh all` 或 `PROFILE=a16 ./build.sh all`。
+
+> **A17（`./build.sh a17`）说明**：`MANIFEST_BRANCH=lineage-24.0`，`LOCAL_MANIFEST_NAME=cannon-a17.xml`。
+> 5 个自有仓的 `lineage-24.0-cannon` 分支目前**由 `lineage-23.2-cannon` 作为基线派生**（内容仍是 A16 态），
+> 属“新版本脚手架基线”，后续需在 A17 源码上按症状签名重新移植/补丁。基线阶段 `repro/patches/a17/` 为空，
+> `apply_a17_cannon_patches.sh` 会打印提示并 0 退出，即**当前先 repo sync 即可**。
+> 上游 `LineageOS/android.git` 及 `hardware/mediatek`、`hardware/xiaomi`、`device/mediatek/sepolicy_vndr`
+> 均确认存在 `lineage-24.0` 分支。
 
 单独跑：
 

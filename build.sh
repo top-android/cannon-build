@@ -9,6 +9,7 @@
 #   ./build.sh a14      同 all（A14，显式别名）
 #   ./build.sh a15      A15 专用：init + sync + apply 补丁 + build（LineageOS 22.2）
 #   ./build.sh a16      A16 专用：init + sync + apply 补丁 + build（LineageOS 23.2 / Android 16）
+#   ./build.sh a17      A17 专用：init + sync + apply 补丁 + build（LineageOS 24.0 / Android 17）
 #
 # 【2026-10-31】A14 也改为「上游 LineageOS/AOSP + build-time 补丁」：
 #   原 top-android/android_* 快照仓已删，A14 现在与 A15/A16 同一套 apply 机制
@@ -66,6 +67,25 @@ apply_a16_profile() {
     PATCH_SUBDIR="a16"
 }
 [ "${PROFILE:-}" = "a16" ] && apply_a16_profile
+
+# ---- A17 profile（LineageOS 24.0 / Android 17）----
+# 目标：lunch lineage_cannon <release> user（发布变体），local_manifests 用 cannon-a17.xml
+#       （5 自有仓 lineage-24.0-cannon 双轨 + 上游 lineage-24.0 + build-time 补丁），
+#       编译前重放 A17 构建期补丁（apply_a17，幂等；基线阶段无补丁则自动跳过）。
+# [待确认] A17 的 lunch release 代号（A16=bp4a）。上机后按 build/release/aconfig 实际改，
+#          或用 CANNON_RELEASE=<code> 覆盖。
+apply_a17_profile() {
+    MANIFEST_BRANCH="lineage-24.0"
+    local variant="${CANNON_VARIANT:-user}"
+    local release="${CANNON_RELEASE:-bp5a}"   # 待确认
+    LUNCH_TARGET="lineage_cannon-${release}-${variant}"   # 仅用于显示/兼容旧逻辑
+    LUNCH_ARGS=(lineage_cannon "$release" "$variant")     # A17 三参：product release variant
+    LOCAL_MANIFEST_NAME="cannon-a17.xml"
+    APPLY_PATCHES="1"
+    APPLY_SCRIPT="$SRC_DIR/scripts/apply_a17_cannon_patches.sh"
+    PATCH_SUBDIR="a17"
+}
+[ "${PROFILE:-}" = "a17" ] && apply_a17_profile
 
 c_red()  { printf '\033[31m%s\033[0m\n' "$*"; }
 c_grn()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -203,5 +223,6 @@ case "${1:-}" in
     a14)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a15)    apply_a15_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a16)    apply_a16_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
+    a17)    apply_a17_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     *)      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
 esac
