@@ -39,7 +39,9 @@
              name="top-android/android_hardware_mediatek_wlan"
              remote="devs" revision="lineage-24.0-cannon" />
 
-    <!-- Wifi 框架 fork（老 vendor getFeatureSet/getWakeReason 空指针旁路等修复） -->
+    <!-- Wifi 框架 fork（老 vendor getFeatureSet/getWakeReason 空指针旁路等修复）
+         上游 lineage-24.0 主 manifest 已含 packages/modules/Wifi，须先 remove 再 override -->
+    <remove-project name="LineageOS/android_packages_modules_Wifi" />
     <project path="packages/modules/Wifi"
              name="top-android/android_packages_modules_Wifi"
              remote="devs" revision="lineage-24.0-cannon" />
