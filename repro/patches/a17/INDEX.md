@@ -2,7 +2,7 @@
 
 > 源码树 `/cannon/rom-a17`（LineageOS 24.0 / Android 17 / `lineage-24.0-cannon` / bp1a）。
 > 详细背景与分类说明见同目录 `README.md`。本文件只做**逐补丁清单**（文件名 / 大小 / 目标 / 基线 / 来源）。
-> 截至 2026-11-03，共 **24** 个 `.patch`。`scripts/apply_a17_cannon_patches.sh` 幂等重放（缺省按文件名顺序）。
+> 截至 2026-11-04，共 **25** 个 `.patch`。`scripts/apply_a17_cannon_patches.sh` 幂等重放（缺省按文件名顺序）。
 
 ## 一、自有仓（top-android 组织内）——**双轨：本地 commit 入库 + 含二进制 patch**
 
@@ -15,8 +15,10 @@
 | kernel_xiaomi_cannon.patch | 3924 | kernel/xiaomi/cannon | `215867a3d` → `cf7bd8d54` | 5 files：`cannon_defconfig`(关 COMPAT_VDSO)、`scripts/extract-cert.c`(BoringSSL 桩)、`asm/spinlock.h`(I→i)、`asm/stack_pointer.h`(sp 宏)、`Makefile`(-Wno-default-const-init-var-unsafe) |
 | hardware_mediatek_wlan.patch | 717 | hardware/mediatek/wlan | `b042dac` → `3a37b5b` | 1 file：`mediatek_driver_cmd_nl80211.c` BITS 掩码修正 |
 
-> 注：`vendor/xiaomi/cannon` 仓 A17 期无净改动（曾试 `dex_import` 加 `dex_preopt` 属性属非法，已撤销；正确的 dexpreopt 关闭在 device.mk 产品变量中），故无 vendor 补丁。
+| vendor_xiaomi_cannon.patch | 1296 | vendor/xiaomi/cannon | `c6dafbc` → `224fff4` | 1 file `cannon-vendor.mk`：删 cas@1.2-service-lazy 预编译 copy。A17 make 的 PRODUCT_COPY_FILES 去重会把同名 soong 模块 `android.hardware.cas@1.2-service-lazy` 拉入安装集，连带装其 `lazy.rc/lazy.xml`，与 device.mk 装的基模块 `cas@1.2-service` 的 `service.xml` 同声明 `@1.2::IMediaCasService/default` → `check_vintf_vendor` 报 `Conflicting FqInstance`。删除该 copy 行后仅剩基模块单一 manifest（同 A16-D13 去 -lazy 思路）|
 | packages_modules_Wifi.patch | 6119 | packages/modules/Wifi | 见补丁头 | 老 vendor getFeatureSet/getWakeReason 空指针旁路 |
+
+> 注：`vendor/xiaomi/cannon` 仓此前 A17 期无净改动（曾试 `dex_import` 加 `dex_preopt` 属性属非法已撤销，正确 dexpreopt 关闭改在 device.mk 产品变量）；本轮新增 cas lazy copy 删除，故恢复 vendor 补丁（`c6dafbc`→`224fff4`）。
 
 ## 二、AOSP 上游仓——**单轨：上游 + build-time apply patch（不 commit 入库）**
 
