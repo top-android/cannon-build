@@ -6,7 +6,7 @@ Xiaomi Redmi Note 9T 5G（`cannon` / `cannong`，MT6853T）在 A12 厂商底座�
 - **A14 / LineageOS 21**（默认，`lineage_cannon-ap2a-userdebug`）
 - **A15 / LineageOS 22.2**（`lineage_cannon-bp1a-user`，已适配完成并发布）
 - **A16 / LineageOS 23.2**（`lineage_cannon bp4a userdebug`，Android 16；**lunch 需三参** product/release/variant）
-- **A17 / LineageOS 24.0**（Android 17；**lunch 亦三参** product/release/variant，release 代号待确认，默认 `bp5a`，可用 `CANNON_RELEASE=<code>` 覆盖）
+- **A17 / LineageOS 24.0**（Android 17；**lunch 亦三参** product/release/variant。release 代号 **`cp2a`**，已设为脚本默认值：本树 `vendor/lineage/release/release_config_map.mk` 只声明了 cp2a；老版本里写的 `bp5a` 不存在）
 
 目标：**clone 这一个仓库 → 一条 `./build.sh` 命令 → 出包**，不再依赖任何本机手工 sed。
 
@@ -28,8 +28,15 @@ cd cannon-build
 ./build.sh a16       # init(lineage-23.2) + sync + apply A16 补丁(幂等) + build
 
 # A17：LineageOS 24.0 / Android 17（init -b lineage-24.0，local_manifests=cannon-a17.xml）
-./build.sh a17       # init(lineage-24.0) + sync + apply A17 补丁(幂等；基线阶段无补丁自动跳过) + build
+# 注意：A17 的 release 代号默认就是 cp2a；a17 profile 默认产出 user，
+#       要调试变体得显式 CANNON_VARIANT=eng，否则 lunch 会落到 user。
+CANNON_VARIANT=eng ./build.sh a17
 ```
+
+> A17 eng 的**固定命令与环境变量**见 [`BUILD_A17_ENG.md`](BUILD_A17_ENG.md)。
+> 该文档里还有「A17 在 MT6853(4.14) 上必须满足的三个条件」（legacy ION、ION sepolicy、
+> Connectivity 固定到 `d468719`）——缺任何一条都表现为卡第一屏/卡开机动画。
+> 不要手敲 `m`：漏 `CCACHE_EXEC`/`USE_CCACHE` 会改变编译命令指纹，导致全量重编（2026-11-05 实测白烧 8 万步）。
 
 `a15`/`a16` 与 `all` 的差别只是切几个变量；**A14 与 A15/A16 一样，都是「上游 + build-time 补丁」**（原 top-android 快照仓已删）：
 
@@ -42,10 +49,19 @@ cd cannon-build
 
 也可用环境变量临时切：`PROFILE=a15 ./build.sh all` 或 `PROFILE=a16 ./build.sh all`。
 
-> **A17（`./build.sh a17`）说明**：`MANIFEST_BRANCH=lineage-24.0`，`LOCAL_MANIFEST_NAME=cannon-a17.xml`。
-> 5 个自有仓的 `lineage-24.0-cannon` 分支目前**由 `lineage-23.2-cannon` 作为基线派生**（内容仍是 A16 态），
-> 属“新版本脚手架基线”，后续需在 A17 源码上按症状签名重新移植/补丁。基线阶段 `repro/patches/a17/` 为空，
-> `apply_a17_cannon_patches.sh` 会打印提示并 0 退出，即**当前先 repo sync 即可**。
+> **A17（`./build.sh a17`）说明**：`MANIFEST_BRANCH=lineage-24.0`，`LOCAL_MANIFEST_NAME=cannon-a17.xml`，
+> release 代号 **cp2a**（`CANNON_RELEASE=cp2a`），变体默认 `user`（`CANNON_VARIANT=eng` 可切）。
+> 5 个自有仓的 `lineage-24.0-cannon` 分支由 `lineage-23.2-cannon` 派生，属“新版本脚手架基线”。
+> `repro/patches/a17/` 现有 25 个补丁，`apply_a17_cannon_patches.sh` 幂等重放；
+> 2026-11-05 实测：**applied=19 / skipped=5（改动已含在自有仓分支里）/ drift=0**。
+>
+> 其中 `build/` 下有两个补丁，别混：
+>
+> | 补丁 | 落点 | 内容 |
+> |---|---|---|
+> | `build_make.patch` | `build/make` | recovery/target_files 的 `d` 软链、`BOARD_CANNON_VENDOR_PREASSEMBLE` vendor 预组装钩子、`CANNON_SKIP_VINTF_COMPAT` 跳过 VINTF 兼容检查 |
+> | `build_soong.patch` | `build/soong` | `ci_test_package_zip.go` 树外绝对路径、boot jar 包名白名单、`gen_build_prop.py` 显示串 |
+>
 > 上游 `LineageOS/android.git` 及 `hardware/mediatek`、`hardware/xiaomi`、`device/mediatek/sepolicy_vndr`
 > 均确认存在 `lineage-24.0` 分支。
 
@@ -65,7 +81,7 @@ cd cannon-build
 | `OUT_DIR` | `/cannon/out` | **必须显式设置**，否则 soong 落到 `$ROM_DIR/out` 从零编 17 万步 |
 | `LOG` | `/cannon/build.log` | 编译日志 |
 | `CCACHE_DIR` | `/cannon/ccache` | ccache 目录 |
-| `JOBS` | `8` | `bacon` 在 `-j16` 会 OOM（exit 137） |
+| `JOBS` | `$(nproc)` | 默认取系统最大线程数，内存不足时 `JOBS=N` 覆盖 |
 | `LUNCH_TARGET` | `lineage_cannon-ap2a-userdebug` | |
 
 > 选 `a15`/`a16`（或 `PROFILE=a15`/`PROFILE=a16`）会覆盖 `MANIFEST_BRANCH` / `LOCAL_MANIFEST_NAME` / `LUNCH_TARGET`

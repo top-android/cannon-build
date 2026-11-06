@@ -11,7 +11,7 @@
 
 | 补丁 | 大小 | 仓库 | 基线 → HEAD | 变更摘要 |
 |---|---|---|---|---|
-| device_xiaomi_cannon.patch | 5134 | device/xiaomi/cannon | `36af3c7` → `cb7f630` | 2 files：`BoardConfig.mk`(KERNEL_CROSS_COMPILE=gnu 三元组，治 vDSO 退化 x86_64) + `device.mk`(mediatek vendor jar 移出 PRODUCT_BOOT_JARS；用 `add-product-dex-preopt-module-config(...=disable)` 把 13 个 vendor `dex_import` 置入 `DEXPREOPT_DISABLED_MODULES`，按模块名跳 dex2oat) |
+| device_xiaomi_cannon.patch | 1208 | device/xiaomi/cannon | 当前 HEAD | 2 files：`device.mk` 加 `$(call soong_config_set_bool,libion,legacy_impl,true)`（MT6853 只有 legacy ION，否则 libdmabufheap 无 `/dev/ion` 回退 → gralloc 分配全失败）+ `BoardConfig.mk` 加 `include device/lineage/sepolicy/libion/sepolicy.mk`（放行 `hal_graphics_allocator` 访问 `ion_device`）。**2026-11-06 重新生成**，此前那版（KERNEL_CROSS_COMPILE/dexpreopt）已进入基线，归档到 `_obsolete/` |
 | kernel_xiaomi_cannon.patch | 3924 | kernel/xiaomi/cannon | `215867a3d` → `cf7bd8d54` | 5 files：`cannon_defconfig`(关 COMPAT_VDSO)、`scripts/extract-cert.c`(BoringSSL 桩)、`asm/spinlock.h`(I→i)、`asm/stack_pointer.h`(sp 宏)、`Makefile`(-Wno-default-const-init-var-unsafe) |
 | hardware_mediatek_wlan.patch | 717 | hardware/mediatek/wlan | `b042dac` → `3a37b5b` | 1 file：`mediatek_driver_cmd_nl80211.c` BITS 掩码修正 |
 
@@ -30,7 +30,11 @@ packages_providers_MediaProvider(1572), system_core(1543)
 
 ### 2.2 重定位后生成（A16 hunk 漂移按 A17 改写，5）
 build_make(5594), build_soong(2853), frameworks_opt_telephony(9955),
-packages_apps_Launcher3(4020), packages_modules_Connectivity(17125)
+packages_apps_Launcher3(4020)
+
+> **packages_modules_Connectivity.patch 已停用**（归档于 `_obsolete/`）。
+> 4.14 的 BPF 兼容层改由 `scripts/pin_a17_connectivity.sh` 把该仓固定到
+> cansong 组件集成提交 `d468719`（`build.sh apply` 的 a17 分支会自动调用）。
 
 ### 2.3 其它（1）
 hardware_nxp_secure_element(542)

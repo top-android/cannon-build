@@ -22,7 +22,7 @@ ROM_DIR="${ROM_DIR:-/cannon/rom}"
 OUT_DIR="${OUT_DIR:-/cannon/out}"
 LOG="${LOG:-/cannon/build.log}"
 CCACHE_DIR="${CCACHE_DIR:-/cannon/ccache}"
-JOBS="${JOBS:-8}"                       # bacon 在 -j16 会 OOM（exit 137），别调高
+JOBS="${JOBS:-$(nproc)}"                # 默认取系统最大线程数；内存不足时用 JOBS=N 覆盖
 LUNCH_TARGET="${LUNCH_TARGET:-lineage_cannon-ap2a-userdebug}"
 MANIFEST_URL="${MANIFEST_URL:-https://github.com/LineageOS/android.git}"
 MANIFEST_BRANCH="${MANIFEST_BRANCH:-lineage-21.0}"
@@ -72,12 +72,12 @@ apply_a16_profile() {
 # 目标：lunch lineage_cannon <release> user（发布变体），local_manifests 用 cannon-a17.xml
 #       （5 自有仓 lineage-24.0-cannon 双轨 + 上游 lineage-24.0 + build-time 补丁），
 #       编译前重放 A17 构建期补丁（apply_a17，幂等；基线阶段无补丁则自动跳过）。
-# [待确认] A17 的 lunch release 代号（A16=bp4a）。上机后按 build/release/aconfig 实际改，
-#          或用 CANNON_RELEASE=<code> 覆盖。
+# A17 的 lunch release 代号 = cp2a（2026-11-05 实测：本树 vendor/lineage/release/
+# release_config_map.mk 只声明了 cp2a；A16 是 bp4a）。可用 CANNON_RELEASE=<code> 覆盖。
 apply_a17_profile() {
     MANIFEST_BRANCH="lineage-24.0"
     local variant="${CANNON_VARIANT:-user}"
-    local release="${CANNON_RELEASE:-bp5a}"   # 待确认
+    local release="${CANNON_RELEASE:-cp2a}"
     LUNCH_TARGET="lineage_cannon-${release}-${variant}"   # 仅用于显示/兼容旧逻辑
     LUNCH_ARGS=(lineage_cannon "$release" "$variant")     # A17 三参：product release variant
     LOCAL_MANIFEST_NAME="cannon-a17.xml"
@@ -175,25 +175,66 @@ cmd_apply() {
     [ -f "$script" ] || die "找不到 $script"
     CANNON_PATCHDIR="${CANNON_PATCHDIR:-$SRC_DIR/repro/patches/${PATCH_SUBDIR:-a15}}" \
         bash "$script" "$ROM_DIR"
+
+    # A17：packages/modules/Connectivity 必须固定在 d468719（cannong A17 组件集成，
+    # 内含 4.14 内核的 BPF 兼容层；主线版本会在 LocalNetEventHandler/BpfRingbuf 处
+    # 让 system_server SIGABRT，卡开机动画）
+    if [ "${PROFILE:-}" = "a17" ]; then
+        bash "$SRC_DIR/scripts/pin_a17_connectivity.sh" "$ROM_DIR" || die "Connectivity 固定失败"
+    fi
+}
+
+# siso 1.5.8 的 --config_repo_dir 只认相对路径：OUT_DIR 是树外绝对路径时，
+# soong 会传绝对的 --config_repo_dir，siso 直接报
+#   failed to load @config//main.star: open main.star: no such file or directory
+# 处理：在源码树内建 out -> $OUT_DIR 软链，把 OUT_DIR 换成相对的 out（产物仍在原位置）。
+normalize_out_dir() {
+    case "$OUT_DIR" in
+        /*)
+            [ "$OUT_DIR" = "$ROM_DIR/out" ] && return 0
+            mkdir -p "$OUT_DIR"
+            if [ -e "$ROM_DIR/out" ] && [ ! -L "$ROM_DIR/out" ]; then
+                die "$ROM_DIR/out 是真实目录，与 OUT_DIR=$OUT_DIR 冲突；先移走它"
+            fi
+            ln -sfn "$OUT_DIR" "$ROM_DIR/out"
+            c_ylw "OUT_DIR 在源码树外 → 已建软链 $ROM_DIR/out -> $OUT_DIR，改用 OUT_DIR=out（规避 siso 绝对路径 bug）"
+            OUT_DIR="out"
+            ;;
+    esac
 }
 
 cmd_build() {
     [ -f "$ROM_DIR/build/envsetup.sh" ] || die "源码不完整，先跑 ./build.sh sync"
+    normalize_out_dir
     [ -n "${OUT_DIR:-}" ] || die "OUT_DIR 必须设置"   # 不设会落到 $ROM_DIR/out，白编 17 万步
 
     step "编译 → $LUNCH_TARGET  (OUT_DIR=$OUT_DIR, -j$JOBS)"
     mkdir -p "$(dirname "$LOG")"
+    : > "$LOG"
     cd "$ROM_DIR"
 
     export USE_CCACHE=1
     export CCACHE_EXEC="$(command -v ccache || true)"
     export CCACHE_DIR CCACHE_MAXSIZE=50G
-    export GOGC=50
+    export GOGC="${GOGC:-30}"
+    export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
     export OUT_DIR
+
+    # A17 铁律：一律 siso，绝不回退 ninja（见 docs/A17_SISO_NEVER_NINJA.md）。
+    # 手动 `m` 时若漏掉上面这几个变量，命令指纹会变 → 整片重编，所以统一从这里进。
+    if [ "${SOONG_NINJA:-siso}" != "siso" ]; then
+        die "SOONG_NINJA 必须是 siso，禁止回退 ninja"
+    fi
+    export SOONG_NINJA=siso
+    # 增量分析：只有显式 true 才走，不设=全量（config.go:359）。
+    # soong_build 无论增量都要加载全图（~40G），增量省的是重算时间。
+    export SOONG_INCREMENTAL_ANALYSIS=true
 
     # 不设的话 soong 会用 "eng.<用户名>.<时间戳>"（build/soong/ui/build/build.go:73），
     # ro.build.version.incremental 就变成 eng.root.20261027.103315 这种难看的串
     export BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d)}"
+
+    c_ylw "环境: OUT_DIR=$OUT_DIR CCACHE_DIR=$CCACHE_DIR CCACHE_EXEC=$CCACHE_EXEC GOGC=$GOGC JOBS=$JOBS BUILD_NUMBER=$BUILD_NUMBER SOONG_NINJA=$SOONG_NINJA"
 
     # shellcheck disable=SC1091
     source build/envsetup.sh >/dev/null
@@ -205,8 +246,17 @@ cmd_build() {
         lunch "$LUNCH_TARGET"
     fi
 
+    # A17 实测（2026-11-05）：target_files 的打包命令会直接 cp $OUT/vendor.img，
+    # 但 kati 没给它建依赖 → 并发下先跑到打包就报
+    #   cp: bad 'out/target/product/cannon/vendor.img': No such file or directory
+    # 先显式构建一次镜像（已存在则秒过），保证打包时文件在。
+    step "预构建 vendor.img（规避 target_files 缺依赖）"
+    m -j"$JOBS" vendorimage 2>&1 | tee -a "$LOG"
+    local vrc=${PIPESTATUS[0]}
+    [ "$vrc" -eq 0 ] || die "vendorimage 失败（rc=$vrc），看 $LOG"
+
     local start; start=$(date +%s)
-    m -j"$JOBS" bacon 2>&1 | tee "$LOG"
+    m -j"$JOBS" bacon 2>&1 | tee -a "$LOG"
     local rc=${PIPESTATUS[0]}
     [ "$rc" -eq 0 ] || die "编译失败（rc=$rc），看 $LOG"
 
@@ -214,11 +264,49 @@ cmd_build() {
     ls -lh "$OUT_DIR"/target/product/cannon/lineage-*.zip 2>/dev/null || true
 }
 
+# 单模块/单目标编译：走同一套环境、同一个日志，避免手敲漏变量
+#   PROFILE=a17 CANNON_VARIANT=eng ./build.sh module librenderengine
+cmd_module() {
+    [ $# -ge 1 ] || die "用法: ./build.sh module <target> [target...]"
+    [ -f "$ROM_DIR/build/envsetup.sh" ] || die "源码不完整，先跑 ./build.sh sync"
+    normalize_out_dir
+    step "编译目标: $*  (OUT_DIR=$OUT_DIR, -j$JOBS)"
+    mkdir -p "$(dirname "$LOG")"
+    cd "$ROM_DIR"
+
+    export USE_CCACHE=1
+    export CCACHE_EXEC="$(command -v ccache || true)"
+    export CCACHE_DIR CCACHE_MAXSIZE=50G
+    export GOGC="${GOGC:-30}"
+    export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
+    export OUT_DIR
+    export BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d)}"
+    export SOONG_NINJA=siso
+    export SOONG_INCREMENTAL_ANALYSIS=true
+
+    c_ylw "环境: OUT_DIR=$OUT_DIR CCACHE_DIR=$CCACHE_DIR CCACHE_EXEC=$CCACHE_EXEC GOGC=$GOGC JOBS=$JOBS BUILD_NUMBER=$BUILD_NUMBER"
+
+    # shellcheck disable=SC1091
+    source build/envsetup.sh >/dev/null
+    if [ "${#LUNCH_ARGS[@]}" -gt 0 ]; then
+        lunch "${LUNCH_ARGS[@]}"
+    else
+        lunch "$LUNCH_TARGET"
+    fi
+
+    echo "=== module build: $* $(date -u '+%F %T') UTC ===" >> "$LOG"
+    m -j"$JOBS" "$@" 2>&1 | tee -a "$LOG"
+    local rc=${PIPESTATUS[0]}
+    [ "$rc" -eq 0 ] || die "编译失败（rc=$rc），看 $LOG"
+    c_grn "完成: $*"
+}
+
 case "${1:-}" in
     doctor) cmd_doctor ;;
     init)   cmd_init ;;
     sync)   cmd_sync ;;
     build)  cmd_build ;;
+    module) shift; cmd_module "$@" ;;
     all)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a14)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a15)    apply_a15_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
