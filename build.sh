@@ -169,19 +169,17 @@ cmd_apply() {
         c_ylw "未启用补丁（APPLY_PATCHES=0），跳过"
         return 0
     fi
+    # A17：Connectivity 的补丁必须打在固定提交 d468719 之上，所以 pin 必须先于补丁
+    if [ "${PROFILE:-}" = "a17" ]; then
+        bash "$SRC_DIR/scripts/pin_a17_connectivity.sh" "$ROM_DIR" || die "Connectivity 固定失败"
+    fi
+
     step "应用构建期补丁（幂等：仓库里已提交的改动会自动跳过）"
     local script="$APPLY_SCRIPT"
     [ -n "$script" ] || script="$SRC_DIR/scripts/apply_a14_cannon_patches.sh"
     [ -f "$script" ] || die "找不到 $script"
     CANNON_PATCHDIR="${CANNON_PATCHDIR:-$SRC_DIR/repro/patches/${PATCH_SUBDIR:-a15}}" \
         bash "$script" "$ROM_DIR"
-
-    # A17：packages/modules/Connectivity 必须固定在 d468719（cannong A17 组件集成，
-    # 内含 4.14 内核的 BPF 兼容层；主线版本会在 LocalNetEventHandler/BpfRingbuf 处
-    # 让 system_server SIGABRT，卡开机动画）
-    if [ "${PROFILE:-}" = "a17" ]; then
-        bash "$SRC_DIR/scripts/pin_a17_connectivity.sh" "$ROM_DIR" || die "Connectivity 固定失败"
-    fi
 }
 
 # siso 1.5.8 的 --config_repo_dir 只认相对路径：OUT_DIR 是树外绝对路径时，

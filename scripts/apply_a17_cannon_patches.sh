@@ -64,11 +64,14 @@ MAP=(
   "packages_apps_Launcher3.patch:packages/apps/Launcher3"
   "packages_apps_Settings.patch:packages/apps/Settings"
   "packages_modules_Bluetooth.patch:packages/modules/Bluetooth"
-  "packages_modules_Connectivity.patch:packages/modules/Connectivity"
+  # [cannon] 主线 packages_modules_Connectivity.patch 已停用（_obsolete/）；
+  # 该仓先被 pin 到 d468719，再打本补丁（loader 的 4.14 降级修正）
+  "packages_modules_Connectivity_loader.patch:packages/modules/Connectivity"
   "packages_modules_NetworkStack.patch:packages/modules/NetworkStack"
   "packages_modules_Wifi.patch:packages/modules/Wifi"
   "packages_providers_MediaProvider.patch:packages/providers/MediaProvider"
   "system_core.patch:system/core"
+  "system_netd.patch:system/netd"                       # netd1shot reboot_on_failure 注释（4.14 调 BPF 期）
   "system_libhidl.patch:system/libhidl"
   "vendor_lineage.patch:vendor/lineage"
   # A17 4.14 非GKI 内核头 sbox 链三补丁（同一 repo/lineage，分文件独立 apply）：

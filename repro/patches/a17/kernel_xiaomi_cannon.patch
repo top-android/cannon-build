@@ -1,101 +1,118 @@
-diff --git a/Makefile b/Makefile
-index 3a1bc746c..48c65ed61 100644
---- a/Makefile
-+++ b/Makefile
-@@ -995,6 +995,10 @@ KBUILD_CFLAGS   += $(call cc-option,-Werror=incompatible-pointer-types)
- # Require designated initializers for all marked structures
- KBUILD_CFLAGS   += $(call cc-option,-Werror=designated-init)
- KBUILD_CFLAGS += -Wno-int-conversion -Wno-strict-prototypes -Wno-single-bit-bitfield-constant-conversion
-+# Newer clang flags const objects declared without an initializer (e.g. the
-+# typecheck() idiom inside u64_to_user_ptr() when passed a 'const u64').
-+# Vendor/mediatek code trips this; suppress it when supported.
-+KBUILD_CFLAGS += $(call cc-option,-Wno-default-const-init-var-unsafe)
+diff --git a/include/uapi/linux/bpf.h b/include/uapi/linux/bpf.h
+index fec2d7abf..beaceae2f 100644
+--- a/include/uapi/linux/bpf.h
++++ b/include/uapi/linux/bpf.h
+@@ -840,6 +840,15 @@ enum bpf_adj_room_mode {
+ /* user accessible mirror of in-kernel sk_buff.
+  * new fields can only be added to the end of this structure
+  */
++#define __bpf_md_ptr(type, name)	\
++union {					\
++	type name;			\
++	__u64 name##_u64;		\
++}
++
++struct bpf_flow_keys;
++struct bpf_sock;
++
+ struct __sk_buff {
+ 	__u32 len;
+ 	__u32 pkt_type;
+@@ -868,6 +877,20 @@ struct __sk_buff {
+ 	__u32 local_ip6[4];	/* Stored in network byte order */
+ 	__u32 remote_port;	/* Stored in network byte order */
+ 	__u32 local_port;	/* stored in host byte order */
++	/* [cannon][A17·4.14] 以下字段对齐 bionic uapi 布局：
++	 * data_meta=140 flow_keys=144 tstamp=152 wire_len=160 gso_segs=164
++	 * sk=168 gso_size=176 —— A17 的 BPF 程序（tethering APEX）按这套
++	 * 偏移访问 ctx，内核结构体必须一一对应，否则 check_ctx_access 拒绝 */
++	__u32 data_meta;
++	__bpf_md_ptr(struct bpf_flow_keys *, flow_keys);
++	__u64 tstamp;
++	__u32 wire_len;
++	__u32 gso_segs;
++	__bpf_md_ptr(struct bpf_sock *, sk);
++	__u32 gso_size;
++	__u8 tstamp_type;
++	__u32 : 24;
++	__u64 hwtstamp;
+ };
  
- # change __FILE__ to the relative path from the srctree
- KBUILD_CFLAGS	+= $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
-diff --git a/arch/arm64/configs/cannon_defconfig b/arch/arm64/configs/cannon_defconfig
-index e9b97331a..298c770a8 100644
---- a/arch/arm64/configs/cannon_defconfig
-+++ b/arch/arm64/configs/cannon_defconfig
-@@ -64,7 +64,7 @@ CONFIG_CMDLINE="androidboot.selinux=permissive"
- # CONFIG_EFI is not set
- # CONFIG_CORE_DUMP_DEFAULT_ELF_HEADERS is not set
- CONFIG_COMPAT=y
--CONFIG_COMPAT_VDSO=y
-+# CONFIG_COMPAT_VDSO is not set
- CONFIG_PM_DEBUG=y
- CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
- CONFIG_CPU_IDLE_GOV_TEO=y
-diff --git a/arch/arm64/include/asm/spinlock.h b/arch/arm64/include/asm/spinlock.h
-index 82375b896..149361ede 100644
---- a/arch/arm64/include/asm/spinlock.h
-+++ b/arch/arm64/include/asm/spinlock.h
-@@ -64,7 +64,7 @@ static inline void arch_spin_lock(arch_spinlock_t *lock)
- 	/* We got the lock. Critical section starts here. */
- "3:"
- 	: "=&r" (lockval), "=&r" (newval), "=&r" (tmp), "+Q" (*lock)
--	: "Q" (lock->owner), "I" (1 << TICKET_SHIFT)
-+	: "Q" (lock->owner), "i" (1 << TICKET_SHIFT)
- 	: "memory");
+ struct bpf_tunnel_key {
+@@ -975,6 +998,20 @@ struct bpf_sock_ops {
+ 	__u32 local_ip6[4];	/* Stored in network byte order */
+ 	__u32 remote_port;	/* Stored in network byte order */
+ 	__u32 local_port;	/* stored in host byte order */
++	/* [cannon][A17·4.14] 以下字段对齐 bionic uapi 布局：
++	 * data_meta=140 flow_keys=144 tstamp=152 wire_len=160 gso_segs=164
++	 * sk=168 gso_size=176 —— A17 的 BPF 程序（tethering APEX）按这套
++	 * 偏移访问 ctx，内核结构体必须一一对应，否则 check_ctx_access 拒绝 */
++	__u32 data_meta;
++	__bpf_md_ptr(struct bpf_flow_keys *, flow_keys);
++	__u64 tstamp;
++	__u32 wire_len;
++	__u32 gso_segs;
++	__bpf_md_ptr(struct bpf_sock *, sk);
++	__u32 gso_size;
++	__u8 tstamp_type;
++	__u32 : 24;
++	__u64 hwtstamp;
+ };
+ 
+ /* List of known BPF sock_ops operators.
+diff --git a/net/core/filter.c b/net/core/filter.c
+index 2f2012d13..86206c81c 100644
+--- a/net/core/filter.c
++++ b/net/core/filter.c
+@@ -4092,6 +4092,28 @@ static u32 sock_filter_convert_ctx_access(enum bpf_access_type type,
+ 	return insn - insn_buf;
  }
  
-@@ -93,7 +93,7 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
- 	"	eor	%w1, %w1, %w0\n"
- 	"1:")
- 	: "=&r" (lockval), "=&r" (tmp), "+Q" (*lock)
--	: "I" (1 << TICKET_SHIFT)
-+	: "i" (1 << TICKET_SHIFT)
- 	: "memory");
- 
- 	return !tmp;
-diff --git a/arch/arm64/include/asm/stack_pointer.h b/arch/arm64/include/asm/stack_pointer.h
-index 8e57c96ad..98ea4edb7 100644
---- a/arch/arm64/include/asm/stack_pointer.h
-+++ b/arch/arm64/include/asm/stack_pointer.h
-@@ -4,7 +4,16 @@
- 
- /*
-  * how to get the current stack pointer from C
-+ *
-+ * Newer clang rejects "register ... asm(\"sp\")" global register variables
-+ * ("register 'sp' unsuitable for global register variables on this target").
-+ * Read sp through a small inline-asm statement expression instead; this keeps
-+ * the existing value-style call sites (no parentheses) working unchanged.
-  */
--register unsigned long current_stack_pointer asm ("sp");
-+#define current_stack_pointer ({ \
-+	unsigned long __cur_sp; \
-+	asm volatile("mov %0, sp" : "=r" (__cur_sp)); \
-+	__cur_sp; \
-+})
- 
- #endif /* __ASM_STACK_POINTER_H */
-diff --git a/scripts/extract-cert.c b/scripts/extract-cert.c
-index dd1a4bd70..618151c8a 100644
---- a/scripts/extract-cert.c
-+++ b/scripts/extract-cert.c
-@@ -119,6 +119,16 @@ int main(int argc, char **argv)
- 		fclose(f);
- 		exit(0);
- 	} else if (!strncmp(cert_src, "pkcs11:", 7)) {
-+#ifdef OPENSSL_IS_BORINGSSL
-+		/*
-+		 * AOSP host toolchain ships BoringSSL, which does not implement the
-+		 * OpenSSL ENGINE / PKCS#11 API (ENGINE_by_id, ENGINE_init,
-+		 * ENGINE_ctrl_cmd*, ...). Our builds never use a pkcs11: URI
-+		 * (CONFIG_SYSTEM_TRUSTED_KEYS is empty), so stub this path out so
-+		 * extract-cert still compiles against BoringSSL.
-+		 */
-+		ERR(1, "PKCS#11 extraction not supported with BoringSSL");
++
++/* [cannon][A17·4.14] 取 skb_shinfo(skb) 到 dst_reg（backport 自 4.14.357/OpenELA） */
++static struct bpf_insn *bpf_convert_shinfo_access(const struct bpf_insn *si,
++						  struct bpf_insn *insn)
++{
++#ifdef NET_SKBUFF_DATA_USES_OFFSET
++	*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sk_buff, end),
++			      BPF_REG_AX, si->src_reg,
++			      offsetof(struct sk_buff, end));
++	*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sk_buff, head),
++			      si->dst_reg, si->src_reg,
++			      offsetof(struct sk_buff, head));
++	*insn++ = BPF_ALU64_REG(BPF_ADD, si->dst_reg, BPF_REG_AX);
 +#else
- 		ENGINE *e;
- 		struct {
- 			const char *cert_id;
-@@ -141,6 +151,7 @@ int main(int argc, char **argv)
- 		ENGINE_ctrl_cmd(e, "LOAD_CERT_CTRL", 0, &parms, NULL, 1);
- 		ERR(!parms.cert, "Get X.509 from PKCS#11");
- 		write_cert(parms.cert);
++	*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sk_buff, end),
++			      si->dst_reg, si->src_reg,
++			      offsetof(struct sk_buff, end));
 +#endif
- 	} else {
- 		BIO *b;
- 		X509 *x509;
++
++	return insn;
++}
++
+ static u32 tc_cls_act_convert_ctx_access(enum bpf_access_type type,
+ 					 const struct bpf_insn *si,
+ 					 struct bpf_insn *insn_buf,
+@@ -4108,6 +4130,22 @@ static u32 tc_cls_act_convert_ctx_access(enum bpf_access_type type,
+ 				      bpf_target_off(struct net_device, ifindex, 4,
+ 						     target_size));
+ 		break;
++	case offsetof(struct __sk_buff, gso_segs):
++		insn = bpf_convert_shinfo_access(si, insn);
++		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct skb_shared_info, gso_segs),
++				      si->dst_reg, si->dst_reg,
++				      bpf_target_off(struct skb_shared_info,
++						     gso_segs, 2,
++						     target_size));
++		break;
++	case offsetof(struct __sk_buff, gso_size):
++		insn = bpf_convert_shinfo_access(si, insn);
++		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct skb_shared_info, gso_size),
++				      si->dst_reg, si->dst_reg,
++				      bpf_target_off(struct skb_shared_info,
++						     gso_size, 2,
++						     target_size));
++		break;
+ 	default:
+ 		return bpf_convert_ctx_access(type, si, insn_buf, prog,
+ 					      target_size);
