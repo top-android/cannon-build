@@ -215,7 +215,10 @@ cmd_build() {
     export CCACHE_EXEC="$(command -v ccache || true)"
     export CCACHE_DIR CCACHE_MAXSIZE=50G
     export GOGC="${GOGC:-30}"
-    export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
+    # GOMEMLIMIT 软限制已移除：44GiB 会让 Go runtime 在 40GB+ 堆时疯狂 GC
+    # （memory stall 600~700ms/s），导致全量分析拖到 40 分钟以上。
+    # 不设软限，交给内核 + swap 兜底。
+    # export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
     export OUT_DIR
 
     # A17 铁律：一律 siso，绝不回退 ninja（见 docs/A17_SISO_NEVER_NINJA.md）。
@@ -276,7 +279,10 @@ cmd_module() {
     export CCACHE_EXEC="$(command -v ccache || true)"
     export CCACHE_DIR CCACHE_MAXSIZE=50G
     export GOGC="${GOGC:-30}"
-    export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
+    # GOMEMLIMIT 软限制已移除：44GiB 会让 Go runtime 在 40GB+ 堆时疯狂 GC
+    # （memory stall 600~700ms/s），导致全量分析拖到 40 分钟以上。
+    # 不设软限，交给内核 + swap 兜底。
+    # export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
     export OUT_DIR
     export BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d)}"
     export SOONG_NINJA=siso
