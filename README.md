@@ -63,11 +63,28 @@ cd cannon-build
 | `LOG` | `/cannon/build.log` | 编译日志 |
 | `CCACHE_DIR` | `/cannon/ccache` | ccache 目录 |
 | `JOBS` | `$(nproc)` | 并行度，内存不足时下调 |
-| `CANNON_VARIANT` | profile 默认 | 构建变体 |
+| `CANNON_VARIANT` | profile 默认 | 构建变体：`userdebug`（默认）/ `eng` / `user` |
 | `CANNON_RELEASE` | profile 默认 | release 代号 |
+| `CANNON_ALLOW_VARIANT_SWITCH` | `0` | `1` = 允许切换变体（会 installclean + 接近全量重编） |
+| `PINNED_MANIFEST` | `latest` | 仅 `build-a17.sh`：锁定清单路径，`latest` = `manifests/` 下最新 |
 
 其余变量（`SOONG_NINJA`、`CCACHE_EXEC` 等）由 `build.sh` 固定，不要临时增删——会改变编译命令指纹，触发全量重编。
 `GOGC` 由 `build.sh` 设为 `100`，可用同名环境变量覆盖，不影响指纹。
+
+### 切换变体（eng / user）
+
+切换变体会让 build 打印 `Build configuration changed ... forcing installclean`，
+删掉 `out/target/product/cannon/` 下已装好的 system / system_ext / product / vendor 和全部 `.img`，
+并因编译参数变化接近全量重编（约 12 万步）。`build-a17.sh` 会比对
+`previous_build_config.mk` 并中止，确实要切加 `CANNON_ALLOW_VARIANT_SWITCH=1`；
+更推荐每个变体独立 OUT_DIR：
+
+```bash
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh all
+```
+
+> ⚠ `device.mk` 里的 eng ADB 属性矩阵（`ro.secure=0` / `ro.adb.secure=0` / `service.adb.root=1`）
+> 在 `user` 变体里也会写进 `/product/build.prop`，正式发布前必须改回。
 
 ## 仓库布局
 

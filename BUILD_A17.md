@@ -4,11 +4,38 @@
 
 ```bash
 cd /cannon/cannon-build
-PROFILE=a17 ./build.sh build
+./build-a17.sh all             # 锁定清单 init + sync + apply 补丁 + build
+./build-a17.sh build           # 树已就绪，只编
+./build-a17.sh module vendorimage
+./build-a17.sh --help          # 完整用法（子命令 / 变体 / 环境变量 / 例子）
 ```
 
-变体默认 `userdebug`，release 默认 `cp2a`。产物 `/cannon/out/target/product/cannon/lineage-24.0-*-cannon.zip`，
-日志 `/cannon/build.log`。
+变体由 `CANNON_VARIANT` 控制（默认 `userdebug`），release 默认 `cp2a`：
+
+| 变体 | lunch | ro.debuggable | 用途 |
+|---|---|---|---|
+| `userdebug` | `lineage_cannon cp2a userdebug` | 1 | 日常调试（默认） |
+| `eng` | `lineage_cannon cp2a eng` | 1 | 工程变体 |
+| `user` | `lineage_cannon cp2a user` | 0 | 发布，需要签名密钥 |
+
+产物 `/cannon/out/target/product/cannon/lineage-24.0-*-cannon.zip`，日志 `/cannon/build.log`。
+
+### 切换变体
+
+切换会触发 installclean —— build 打印 `Build configuration changed ... forcing installclean`，
+删掉 `out/target/product/cannon/` 下已装好的 system / system_ext / product / vendor 和全部 `.img`，
+并因编译参数变化接近全量重编（约 12 万步）。`build-a17.sh` 会比对
+`out/target/product/cannon/previous_build_config.mk` 并**中止**；确实要就地切，加
+`CANNON_ALLOW_VARIANT_SWITCH=1`。更推荐给每个变体单独一个 OUT_DIR，别冲掉现有产物：
+
+```bash
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh all
+CANNON_ALLOW_VARIANT_SWITCH=1 CANNON_VARIANT=eng ./build-a17.sh build
+```
+
+> ⚠ `device/xiaomi/cannon/device.mk` 里写死了 eng 的 ADB 属性矩阵
+> （`ro.secure=0` / `ro.adb.secure=0` / `service.adb.root=1` → `/product/build.prop`），
+> `user` 变体也会带上这套。正式发布前必须改回。
 
 ## 固定环境
 
@@ -29,8 +56,11 @@ PROFILE=a17 ./build.sh build
 
 ## 流程
 
-1. `m -j$JOBS vendorimage` —— A17 的 target_files 打包直接 `cp $OUT/vendor.img`，kati 未建依赖，需先补。
-2. `m -j$JOBS bacon` —— 出 zip。
+`build.sh` 只跑 `m -j$JOBS bacon`，一次出 zip。
+
+2026-11-08 之前「先 `m vendorimage` 再 `bacon`」的 workaround 已删除：根因是 target_files
+打包对 `vendor.img` 本体没有依赖 → 并发抢跑（`No such file` / 无 AVB footer / sparse 头半截），
+已由 `repro/patches/a17/build_make.patch` 在 `build/make/core/Makefile` 里补显式依赖修复。
 
 ## 三个必要条件
 
