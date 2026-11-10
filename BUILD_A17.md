@@ -78,3 +78,35 @@ bash /cannon/kbuild/build-a17-panic.sh
 BpfHandler / NetdUpdatable / ClatCoordinator 失败不 abort。
 
 代价：netd 拿不到 BPF 程序，socket tagging、data saver、cgroup 策略降级。
+
+## 复现「当期树」（锁定清单）
+
+`local_manifests/cannon-a17.xml` 里公有上游仓跟的是 `refs/heads/lineage-24.0`（移动分支），
+`repo sync` 拿到的 HEAD 会随上游前进 —— 那时 `repro/patches/a17/*.patch`（按导出当天的 HEAD
+生成）就可能 drift。要 1:1 复现当期树，用 `repo manifest -r` 导出的锁定清单：
+
+```bash
+cd /cannon/rom
+repo init -u https://github.com/LineageOS/android.git -b lineage-24.0   # 先正常 init
+cp /cannon/cannon-build/manifests/a17-pinned-2026-11-10.xml .repo/manifests/
+mv .repo/local_manifests .repo/local_manifests.bak    # 锁定清单已含自有仓，避免重复 project
+repo init -m a17-pinned-2026-11-10.xml                # 不重给 -u，沿用上面的 url/branch
+repo sync -c -j8
+```
+
+清单内容：**1241 个 project 全部 `revision=<40 位 SHA>`**，包括
+6 个自有仓（device / vendor / kernel / hardware-mediatek / hardware-mediatek_wlan /
+packages-modules-Wifi）、`vendor/lineage-priv/keys`，以及 pin 过的
+`packages/modules/Connectivity@d468719`。
+
+校验当前树是不是这份清单：
+
+```bash
+bash /cannon/cannon-build/scripts/check_a17_pinned.sh \
+     /cannon/cannon-build/manifests/a17-pinned-2026-11-10.xml
+# 一致 1197 / 不一致 0 / 缺失 0 / 未锁定 0
+```
+
+> `build.sh init` 会把 `local_manifests/cannon-a17.xml` 重新装回去并 `repo init` 到**分支模式**，
+> 那之后就不再是锁定的树了。要锁定状态就别再跑 `build.sh init`；日常 `build` 不受影响
+> （它只 lunch + 编，不重做 init）。
