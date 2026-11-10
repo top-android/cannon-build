@@ -1,5 +1,5 @@
 diff --git a/core/java/android/os/storage/StorageManager.java b/core/java/android/os/storage/StorageManager.java
-index e2ef800b5..6ffe9a4d2 100644
+index 81fb97598..1abd04517 100644
 --- a/core/java/android/os/storage/StorageManager.java
 +++ b/core/java/android/os/storage/StorageManager.java
 @@ -1700,6 +1700,16 @@ public class StorageManager {
@@ -72,10 +72,10 @@ index d2db8f74c..4c2dd8dee 100644
                      if (soundPath != null) {
                          final Uri soundUri = Uri.parse("file://" + soundPath);
 diff --git a/services/core/java/com/android/server/StorageManagerService.java b/services/core/java/com/android/server/StorageManagerService.java
-index 81e70659f..00807dbdc 100644
+index c7d9893a3..d52c4c449 100644
 --- a/services/core/java/com/android/server/StorageManagerService.java
 +++ b/services/core/java/com/android/server/StorageManagerService.java
-@@ -1005,6 +1005,17 @@ class StorageManagerService extends IStorageManager.Stub
+@@ -1038,6 +1038,17 @@ class StorageManagerService extends IStorageManager.Stub
      }
  
      private boolean isHevcDecoderSupported() {
@@ -116,10 +116,10 @@ index 8c4efbae0..04051232e 100644
              try {
                  String filePath = getResourceFilePath(res);
 diff --git a/services/core/java/com/android/server/power/Notifier.java b/services/core/java/com/android/server/power/Notifier.java
-index 44b438bfc..5b5a71562 100644
+index e334af481..1111c99f5 100644
 --- a/services/core/java/com/android/server/power/Notifier.java
 +++ b/services/core/java/com/android/server/power/Notifier.java
-@@ -1198,6 +1198,17 @@ public class Notifier {
+@@ -1313,6 +1313,17 @@ public class Notifier {
              }
  
              // play sound
@@ -138,7 +138,7 @@ index 44b438bfc..5b5a71562 100644
                      wireless ? Settings.Global.WIRELESS_CHARGING_STARTED_SOUND
                              : Settings.Global.CHARGING_STARTED_SOUND);
 diff --git a/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt b/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
-index 73f1033f3..0adc44b0a 100644
+index f4cea89f5..08d88f8e3 100644
 --- a/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
 +++ b/services/permission/java/com/android/server/permission/access/appop/AppOpService.kt
 @@ -124,11 +124,16 @@ class AppOpService(private val service: AccessCheckingService) : AppOpsCheckingS
@@ -164,10 +164,10 @@ index 73f1033f3..0adc44b0a 100644
                          runtimePermissionNameToAppOp[permissionName] = appOpCode
                          runtimeAppOpToPermissionNames[appOpCode] = permissionName
 diff --git a/telephony/java/android/telephony/SubscriptionManager.java b/telephony/java/android/telephony/SubscriptionManager.java
-index 8b926fadb..d7cda8a33 100644
+index 0583761ff..9264aba67 100644
 --- a/telephony/java/android/telephony/SubscriptionManager.java
 +++ b/telephony/java/android/telephony/SubscriptionManager.java
-@@ -4957,4 +4957,20 @@ public class SubscriptionManager {
+@@ -5443,4 +5443,20 @@ public class SubscriptionManager {
              throw ex.rethrowFromSystemServer();
          }
      }

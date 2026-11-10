@@ -1,0 +1,72 @@
+diff --git a/prebuilts/api/202604/private/bpfloader.te b/prebuilts/api/202604/private/bpfloader.te
+index af4920c..45b63d9 100644
+--- a/prebuilts/api/202604/private/bpfloader.te
++++ b/prebuilts/api/202604/private/bpfloader.te
+@@ -84,6 +84,8 @@ neverallow { coredomain -bpfloader -netd -netutils_wrapper } fs_bpf_vendor:file
+ neverallow bpfloader *:{ tcp_socket udp_socket rawip_socket } *;
+ 
+ # No domain should be allowed to ptrace bpfloader
+-neverallow { domain userdebug_or_eng(`-llkd') } bpfloader:process ptrace;
++# [cannon][A17] userdebug/eng 上额外放行 crash_dump：bpfloader 是最早启动的进程之一，
++# 不给 ptrace 就永远拿不到它的 tombstone（tombstone_00~09 全是 0 字节）。
++neverallow { domain userdebug_or_eng(`-llkd -crash_dump') } bpfloader:process ptrace;
+ 
+ neverallow { domain -bpfloader } proc_bpf:file write;
+diff --git a/prebuilts/api/202604/private/crash_dump.te b/prebuilts/api/202604/private/crash_dump.te
+index 4bd1d38..78d3be3 100644
+--- a/prebuilts/api/202604/private/crash_dump.te
++++ b/prebuilts/api/202604/private/crash_dump.te
+@@ -20,6 +20,9 @@ allow crash_dump {
+ 
+ userdebug_or_eng(`
+   allow crash_dump { apexd llkd logd vold }:process { ptrace signal sigchld sigstop sigkill };
++  # [cannon][A17] bpfloader 在 4.14 上会 SIGABRT，但它是最早启动的进程之一，
++  # 没有这条 crash_dump 连 ptrace 都做不了，tombstone 永远是 0 字节。
++  allow crash_dump bpfloader:process { ptrace signal sigchld sigstop sigkill };
+ ')
+ 
+ # Read ART APEX data directory
+@@ -129,6 +132,7 @@ neverallow crash_dump {
+   apexd
+   userdebug_or_eng(`-apexd')
+   bpfloader
++  userdebug_or_eng(`-bpfloader')
+   init
+   kernel
+   keystore
+diff --git a/private/bpfloader.te b/private/bpfloader.te
+index af4920c..45b63d9 100644
+--- a/private/bpfloader.te
++++ b/private/bpfloader.te
+@@ -84,6 +84,8 @@ neverallow { coredomain -bpfloader -netd -netutils_wrapper } fs_bpf_vendor:file
+ neverallow bpfloader *:{ tcp_socket udp_socket rawip_socket } *;
+ 
+ # No domain should be allowed to ptrace bpfloader
+-neverallow { domain userdebug_or_eng(`-llkd') } bpfloader:process ptrace;
++# [cannon][A17] userdebug/eng 上额外放行 crash_dump：bpfloader 是最早启动的进程之一，
++# 不给 ptrace 就永远拿不到它的 tombstone（tombstone_00~09 全是 0 字节）。
++neverallow { domain userdebug_or_eng(`-llkd -crash_dump') } bpfloader:process ptrace;
+ 
+ neverallow { domain -bpfloader } proc_bpf:file write;
+diff --git a/private/crash_dump.te b/private/crash_dump.te
+index 4bd1d38..78d3be3 100644
+--- a/private/crash_dump.te
++++ b/private/crash_dump.te
+@@ -20,6 +20,9 @@ allow crash_dump {
+ 
+ userdebug_or_eng(`
+   allow crash_dump { apexd llkd logd vold }:process { ptrace signal sigchld sigstop sigkill };
++  # [cannon][A17] bpfloader 在 4.14 上会 SIGABRT，但它是最早启动的进程之一，
++  # 没有这条 crash_dump 连 ptrace 都做不了，tombstone 永远是 0 字节。
++  allow crash_dump bpfloader:process { ptrace signal sigchld sigstop sigkill };
+ ')
+ 
+ # Read ART APEX data directory
+@@ -129,6 +132,7 @@ neverallow crash_dump {
+   apexd
+   userdebug_or_eng(`-apexd')
+   bpfloader
++  userdebug_or_eng(`-bpfloader')
+   init
+   kernel
+   keystore

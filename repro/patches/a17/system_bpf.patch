@@ -1,0 +1,102 @@
+diff --git a/loader/Loader.cpp b/loader/Loader.cpp
+index 08c6b6d..ed1ae87 100644
+--- a/loader/Loader.cpp
++++ b/loader/Loader.cpp
+@@ -313,7 +313,16 @@ static bool createMaps(const char* elfPath, ifstream& elfFile, vector<unique_fd>
+     if (getSectionSymNames(elfFile, "maps", mapNames)) return false;
+ 
+     for (int i = 0; i < (int)mapNames.size(); i++) {
+-        if (md[i].zero != 0) abort();
++        // [cannon][A17·4.14] 上游这里直接 abort()：zero 是 bpf_map_def 的布局哨兵，
++        // 非 0 说明 .o 与 Loader 的头文件不一致。4.14 上我们没法修 .o，
++        // abort() 只会让整个 loader SIGABRT 且没有任何上下文。
++        // 改成跳过这个 map 并记日志。
++        if (md[i].zero != 0) {
++            ALOGE("[cannon] map %s has non-zero padding (0x%x), skip due to layout mismatch",
++                  mapNames[i].c_str(), md[i].zero);
++            mapFds.push_back(unique_fd());
++            continue;
++        }
+ 
+         if (kernelVer < md[i].min_kver) {
+             ALOGD("skipping map %s which requires kernel version 0x%x >= 0x%x",
+diff --git a/loader/bpfloader.rs b/loader/bpfloader.rs
+index f23d882..ee0ab8c 100644
+--- a/loader/bpfloader.rs
++++ b/loader/bpfloader.rs
+@@ -730,10 +730,29 @@ fn load_libbpf_progs() {
+ 
+     let file_vec = get_file_vec();
+ 
++    // [cannon][A17·4.14] 4.14 内核上必然有 object 加载失败（依赖 4.19+/5.x 的
++    // map/prog 类型，例如 sockops/DEVMAP_HASH/cgroup hooks）。上游对 critical
++    // 对象直接 panic!，而本 crate 是 panic=abort → SIGABRT；更糟的是循环就此
++    // 终止，**后面所有 object 都不会再加载、也不会 pin**。
++    // 结果：/sys/fs/bpf/netd_shared/prog_netd_skfilter_* 全缺失 →
++    //   netd 的 -m bpf --object-pinned 规则整批失败 →
++    //   BandwidthController 初始化 EPERM → Controllers::init() exit(2) →
++    //   netd 无限重启 → system_server 卡在 StartNetworkManagementService。
++    // 4.14 上改成「记 error 继续」，让能加载的 object 全部 pin 上。
++    let degrade = kernel_version().is_ok_and(|v| v < kver(4, 19, 0));
++    if degrade {
++        warn!("[cannon] kernel 4.14: bpfloader degrade mode, critical load failures are not fatal");
++    }
++
+     for file_desc in file_vec {
+         if let Err(e) = libbpf_worker(&file_desc) {
+-            if file_desc.critical {
++            if file_desc.critical && !degrade {
+                 panic!("Error when loading {0}: {e}", file_desc.filename);
++            } else if file_desc.critical {
++                error!(
++                    "[cannon] critical object {0} failed on 4.14, degrade and continue: {e}",
++                    file_desc.filename
++                );
+             } else {
+                 error!("Error when loading {0}: {e}", file_desc.filename);
+             }
+@@ -742,12 +761,23 @@ fn load_libbpf_progs() {
+ }
+ 
+ fn main() {
+-    let kmsg_fd = env::var("ANDROID_FILE__dev_kmsg").unwrap().parse::<i32>().unwrap();
+-    // SAFETY: The init script opens this file for us
+-    let kmsg_file = unsafe { File::from_raw_fd(kmsg_fd) };
+-
+-    if let Err(logger) = BpfKmsgLogger::init(kmsg_file) {
+-        error!("BpfLoader-rs: log::setlogger failed: {logger}");
++    // [cannon][A17·4.14] init 通过环境变量把 /dev/kmsg 的 fd 传进来。上游这里是
++    // 两级 unwrap()，任何一环缺失（init rc 没配、fd 解析失败）都会 panic → abort。
++    // 4.14 上我们只需要「加载能加载的 prog」，日志退化到 logd 即可，不能因此死掉。
++    let kmsg_fd = env::var("ANDROID_FILE__dev_kmsg")
++        .ok()
++        .and_then(|v| v.parse::<i32>().ok());
++    match kmsg_fd {
++        Some(fd) => {
++            // SAFETY: The init script opens this file for us
++            let kmsg_file = unsafe { File::from_raw_fd(fd) };
++            if let Err(logger) = BpfKmsgLogger::init(kmsg_file) {
++                error!("BpfLoader-rs: log::setlogger failed: {logger}");
++            }
++        }
++        None => {
++            error!("[cannon] ANDROID_FILE__dev_kmsg missing/unparsable, degrade to logd only");
++        }
+     }
+ 
+     // Redirect panic messages to both logcat and serial port
+@@ -761,9 +791,12 @@ fn main() {
+     load_libbpf_progs();
+     info!("Loading legacy BPF progs");
+ 
++    // [cannon][A17·4.14] mkdir 失败原来是 panic!（→ SIGABRT）。改成记 error 并
++    // 跳过 legacy vendor loader：vendor 的 legacy prog 加载不上是降级，不是致命错误。
+     if let Err(e) = create_dir(Path::new("/sys/fs/bpf/vendor")) {
+-        panic!("Error during mkdir /sys/fs/bpf/vendor: {e}");
+-    };
++        error!("[cannon] mkdir /sys/fs/bpf/vendor failed, skip legacy vendor loader: {e}");
++        return;
++    }
+ 
+     // SAFETY: Linking in the existing legacy vendor bpfloader functionality.
+     // The following bindgen function can abort() or exit() on failure,

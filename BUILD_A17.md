@@ -72,7 +72,7 @@ bash /cannon/kbuild/build-a17-panic.sh
 
 该内核没有 A17 需要的 BPF backport 能力（`CGROUP_SOCK_ADDR` / `CGROUP_SOCKOPT` /
 `INET_SOCK_RELEASE`，`bpf_prog_load` 直接返回 `-EINVAL`），因此 **不 backport，走闸门降级**：
-`packages_modules_Connectivity_loader.patch` 把 V/25Q2/25Q4 版本闸门降级为警告，
+`packages_modules_Connectivity.patch` 把 V/25Q2/25Q4 版本闸门降级为警告，
 `loadAllObjects()` 失败不 `return 38`（否则走不到平台 loader，`/system/etc/bpf/gpuMem.bpf`
 不会 pin，system_server 读 `gpu_mem_total_map` 时直接 abort），
 BpfHandler / NetdUpdatable / ClatCoordinator 失败不 abort。

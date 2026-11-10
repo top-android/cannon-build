@@ -47,47 +47,39 @@ fi
 
 # 补丁文件名 -> 仓库相对路径（新增 A17 补丁后按需要在此登记）
 MAP=(
+  # [2026-11-10] 全部按当前工作树 `git diff HEAD` 重新导出：repo sync 后上游 HEAD 前移，
+  # 旧补丁的 index/行号已漂移。一个仓库一个补丁，不再对同一仓库拆多个文件。
+  # 自有仓（device / vendor / kernel / hardware-mediatek / hardware-mediatek_wlan /
+  # packages-modules-Wifi）的改动已 commit 进 top-android fork，patch 只作归档，不在此登记。
   "art.patch:art"
   "build_make.patch:build/make"
   "build_soong.patch:build/soong"
-  # [2026-11-09] 指纹 HIDL→AIDL 已 commit 进仓（device 2f2f689 / vendor 2195ada），
-  # 旧 patch 既不能正打也不能反打 → 会造成 drift 失败。保留文件作归档，从 MAP 摘除。
-  # "device_xiaomi_cannon.patch:device/xiaomi/cannon"
   "frameworks_base.patch:frameworks/base"
   "frameworks_native.patch:frameworks/native"
-  "frameworks_opt_net_wifi.patch:frameworks/opt/net/wifi"
   "frameworks_opt_telephony.patch:frameworks/opt/telephony"
   "hardware_lineage_compat.patch:hardware/lineage/compat"
-  # [2026-11-10] hardware/mediatek 已改为自有 fork（top-android/android_hardware_mediatek，
-  # 见 local_manifests/cannon-a17.xml），改动已 commit 进仓 → 与 device/vendor 同处理：
-  # patch 保留作归档，从 MAP 摘除。留在 MAP 里现在只会命中「已应用，跳过」，
-  # 但分支一前进就变 drift 报错，没必要留这个雷。
-  # "hardware_mediatek.patch:hardware/mediatek"
   "hardware_nxp_secure_element.patch:hardware/nxp/secure_element"
-  "hardware_mediatek_wlan.patch:hardware/mediatek/wlan"
-  "hardware_xiaomi_fingerprint_join.patch:hardware/xiaomi"
-  "kernel_xiaomi_cannon.patch:kernel/xiaomi/cannon"
+  "hardware_xiaomi.patch:hardware/xiaomi"
   "packages_apps_Jelly.patch:packages/apps/Jelly"
   "packages_apps_Launcher3.patch:packages/apps/Launcher3"
   "packages_apps_Settings.patch:packages/apps/Settings"
   "packages_modules_Bluetooth.patch:packages/modules/Bluetooth"
-  # [cannon] 主线 packages_modules_Connectivity.patch 已停用（_obsolete/）；
-  # 该仓先被 pin 到 d468719，再打本补丁（loader 的 4.14 降级修正）
-  "packages_modules_Connectivity_loader.patch:packages/modules/Connectivity"
+  # 该仓先被 pin_a17_connectivity.sh 固定到 d468719，再打本补丁（bpf 4.14 降级全套）
+  "packages_modules_Connectivity.patch:packages/modules/Connectivity"
   "packages_modules_NetworkStack.patch:packages/modules/NetworkStack"
-  "packages_modules_Wifi.patch:packages/modules/Wifi"
   "packages_providers_MediaProvider.patch:packages/providers/MediaProvider"
+  "system_bpf.patch:system/bpf"                  # bpfloader 4.14 降级（critical 失败不 panic）+ Loader abort 降级
   "system_core.patch:system/core"
-  "system_netd.patch:system/netd"                       # netd1shot reboot_on_failure 注释（4.14 调 BPF 期）
-  "system_bpf.patch:system/bpf"                         # bpfloader 4.14 降级（critical 失败不 panic）+ Loader abort 降级
-  "system_sepolicy.patch:system/sepolicy"               # userdebug 放行 crash_dump ptrace bpfloader（拿 tombstone）
-  "system_libhidl.patch:system/libhidl"
-  "vendor_lineage.patch:vendor/lineage"
-  # A17 4.14 非GKI 内核头 sbox 链三补丁（同一 repo/lineage，分文件独立 apply）：
-  "vendor_lineage_kernel_headers_sbox.patch:vendor/lineage"     # Android.bp dep_files 补 scripts/**+arch Makefile
-  "vendor_lineage_clean_headers_sbox.patch:vendor/lineage"      # clean_headers.sh 在 sbox(无bionic) 优雅跳过
-  "vendor_lineage_boardkernel_out_prefix.patch:vendor/lineage"  # BoardConfigKernel.mk O= 无条件绝对(治头被沙箱丢弃)
-  # "vendor_xiaomi_cannon.patch:vendor/xiaomi/cannon"   # 同上，已 commit 进仓
+  "system_netd.patch:system/netd"                # netd1shot reboot_on_failure 注释（4.14 调 BPF 期）
+  "system_sepolicy.patch:system/sepolicy"        # userdebug 放行 crash_dump ptrace bpfloader（拿 tombstone）
+  "vendor_lineage.patch:vendor/lineage"          # 内核头 sbox 链（Android.bp dep_files + clean_headers.sh）
+  # ---- 自有仓：已 commit 进 fork，patch 仅归档，不参与 apply ----
+  # "device_xiaomi_cannon.patch:device/xiaomi/cannon"
+  # "vendor_xiaomi_cannon.patch:vendor/xiaomi/cannon"
+  # "kernel_xiaomi_cannon.patch:kernel/xiaomi/cannon"
+  # "hardware_mediatek.patch:hardware/mediatek"
+  # "hardware_mediatek_wlan.patch:hardware/mediatek/wlan"
+  # "packages_modules_Wifi.patch:packages/modules/Wifi"
 )
 
 APPLIED=0; SKIPPED=0; DRIFT=0; BINARY=0; FAIL=0

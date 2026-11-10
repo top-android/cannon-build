@@ -1,0 +1,15 @@
+diff --git a/aidl/fingerprint/Android.bp b/aidl/fingerprint/Android.bp
+index 96ca610..cc145ce 100644
+--- a/aidl/fingerprint/Android.bp
++++ b/aidl/fingerprint/Android.bp
+@@ -18,6 +18,10 @@ cc_binary {
+         "LockoutTracker.cpp",
+         "Session.cpp",
+         "service.cpp",
++        // [cannon][A17][2026-11-08] V13 原厂 libbase blob 不含本服务 UND 的
++        // Join(vector<string>&, const char*) 实例（A17 libbase 才有）。
++        // 直接在本模块内提供该符号，避免跨 namespace 依赖。
++        "FingerprintJoin.cpp",
+     ],
+     local_include_dirs: [
+         "include",

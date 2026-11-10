@@ -1,8 +1,8 @@
 diff --git a/android/app/src/com/android/bluetooth/a2dp/A2dpService.java b/android/app/src/com/android/bluetooth/a2dp/A2dpService.java
-index 08cd9d9..06523b4 100644
+index 480fc35..f30ca1a 100644
 --- a/android/app/src/com/android/bluetooth/a2dp/A2dpService.java
 +++ b/android/app/src/com/android/bluetooth/a2dp/A2dpService.java
-@@ -475,6 +475,11 @@ public class A2dpService extends ConnectableProfile {
+@@ -489,6 +489,11 @@ public class A2dpService extends ConnectableProfile {
                                      + "): current is "
                                      + mActiveDevice
                                      + " no changed");
@@ -15,10 +15,10 @@ index 08cd9d9..06523b4 100644
                      return true;
                  }
 diff --git a/system/audio_hal_interface/aidl/client_interface_aidl.cc b/system/audio_hal_interface/aidl/client_interface_aidl.cc
-index c1ce661..3398012 100644
+index 8f79bd4..03e9617 100644
 --- a/system/audio_hal_interface/aidl/client_interface_aidl.cc
 +++ b/system/audio_hal_interface/aidl/client_interface_aidl.cc
-@@ -87,7 +87,7 @@ std::vector<AudioCapabilities> BluetoothAudioClientInterface::GetAudioCapabiliti
+@@ -89,7 +89,7 @@ std::vector<AudioCapabilities> BluetoothAudioClientInterface::GetAudioCapabiliti
      return capabilities;
    }
    auto provider_factory = IBluetoothAudioProviderFactory::fromBinder(::ndk::SpAIBinder(
@@ -27,7 +27,7 @@ index c1ce661..3398012 100644
  
    if (provider_factory == nullptr) {
      log::error("can't get capability from unknown factory");
-@@ -112,7 +112,7 @@ BluetoothAudioClientInterface::GetProviderInfo(
+@@ -114,7 +114,7 @@ BluetoothAudioClientInterface::GetProviderInfo(
  
    if (provider_factory == nullptr) {
      provider_factory = IBluetoothAudioProviderFactory::fromBinder(::ndk::SpAIBinder(
@@ -36,7 +36,7 @@ index c1ce661..3398012 100644
    }
  
    if (provider_factory == nullptr) {
-@@ -144,7 +144,7 @@ void BluetoothAudioClientInterface::FetchAudioProvider() {
+@@ -146,7 +146,7 @@ void BluetoothAudioClientInterface::FetchAudioProvider() {
    // re-registered, so we need to re-fetch the service.
    for (int retry_no = 0; retry_no < kFetchAudioProviderRetryNumber; ++retry_no) {
      auto provider_factory = IBluetoothAudioProviderFactory::fromBinder(::ndk::SpAIBinder(
@@ -46,10 +46,10 @@ index c1ce661..3398012 100644
      if (provider_factory == nullptr) {
        log::error("can't get capability from unknown factory");
 diff --git a/system/gd/hci/hci_layer.cc b/system/gd/hci/hci_layer.cc
-index 0ab2036..079e28b 100644
+index fd85769..f2cacd0 100644
 --- a/system/gd/hci/hci_layer.cc
 +++ b/system/gd/hci/hci_layer.cc
-@@ -275,10 +275,30 @@ struct HciLayer::impl {
+@@ -280,10 +280,30 @@ struct HciLayer::impl {
                         "assert failed: command_complete_view.IsValid()");
        (*command_queue_.front().GetCallback<CommandCompleteView>())(command_complete_view);
      } else if (waiting_for != WaitingFor::STATUS_OR_COMPLETE) {
