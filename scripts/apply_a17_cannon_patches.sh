@@ -58,7 +58,11 @@ MAP=(
   "frameworks_opt_net_wifi.patch:frameworks/opt/net/wifi"
   "frameworks_opt_telephony.patch:frameworks/opt/telephony"
   "hardware_lineage_compat.patch:hardware/lineage/compat"
-  "hardware_mediatek.patch:hardware/mediatek"
+  # [2026-11-10] hardware/mediatek 已改为自有 fork（top-android/android_hardware_mediatek，
+  # 见 local_manifests/cannon-a17.xml），改动已 commit 进仓 → 与 device/vendor 同处理：
+  # patch 保留作归档，从 MAP 摘除。留在 MAP 里现在只会命中「已应用，跳过」，
+  # 但分支一前进就变 drift 报错，没必要留这个雷。
+  # "hardware_mediatek.patch:hardware/mediatek"
   "hardware_nxp_secure_element.patch:hardware/nxp/secure_element"
   "hardware_mediatek_wlan.patch:hardware/mediatek/wlan"
   "hardware_xiaomi_fingerprint_join.patch:hardware/xiaomi"
