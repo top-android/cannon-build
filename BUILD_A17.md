@@ -115,6 +115,13 @@ BpfHandler / NetdUpdatable / ClatCoordinator 失败不 abort。
 `repo sync` 拿到的 HEAD 会随上游前进 —— 那时 `repro/patches/a17/*.patch`（按导出当天的 HEAD
 生成）就可能 drift。要 1:1 复现当期树，用 **`build-a17.sh`**（A17 专用入口，默认锁定清单模式）：
 
+> 锁定清单模式**照样 `--depth=1` 浅克隆**（clone 速度不变）：repo 对 SHA revision 直接
+> `git fetch --depth=1 <url> <sha>`，GitHub 支持按 SHA 浅取。实测 `system/bpf@1787201`
+> 3 秒取到，本地 1 条提交 + `.git/shallow`。要回溯历史时 `git fetch --unshallow`。
+>
+> 补丁与清单是配套的：清单不变就不会 drift。将来换新清单（上游前移）后补丁若报
+> 「漂移/不匹配」，按 `repro/patches/a17/INDEX.md` 末尾的方法用 `git diff HEAD` 重导即可。
+
 ```bash
 cd /cannon/cannon-build
 ./build-a17.sh all          # init（锁定清单）+ sync + apply 补丁 + build

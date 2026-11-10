@@ -164,7 +164,10 @@ cmd_init() {
 
 # 锁定清单 init：每个 project 都钉在 40 位 SHA 上，sync 出来的树与导出当天完全一致。
 # 注意两点（与分支模式的区别）：
-#   1) 不用 --depth=1：浅克隆只有分支 tip，钉的 SHA 可能不在里面，sync 会报错。
+#   1) 同样用 --depth=1：repo 对 SHA revision 是直接 `git fetch --depth=1 <url> <sha>`，
+#      GitHub 支持按 SHA 浅取（2026-11-10 实测：system/bpf 钉 1787201，3 秒取到，
+#      本地只有 1 条提交 + .git/shallow）。所以浅克隆不影响锁定，克隆速度也保住。
+#      代价：本地没有历史，要看旧提交得 `git fetch --unshallow`。
 #   2) 锁定清单本身已经包含 local_manifests 的内容（repo manifest -r 是合并后的结果），
 #      所以要把 .repo/local_manifests 挪开，否则同一 project 定义两次。
 cmd_init_pinned() {
@@ -182,7 +185,7 @@ cmd_init_pinned() {
     mkdir -p "$ROM_DIR"
     cd "$ROM_DIR"
     $(repo_bin) init -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH" \
-        --git-lfs -g default,-notdefault,-infra --no-clone-bundle
+        --git-lfs --depth=1 -g default,-notdefault,-infra --no-clone-bundle
 
     step "切换到锁定清单 $name"
     mkdir -p .repo/manifests
