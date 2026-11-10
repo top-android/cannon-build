@@ -23,7 +23,7 @@ PROFILE=a17 ./build.sh build
 | `CCACHE_EXEC` | `/usr/bin/ccache` | 漏了它等于换了一套编译命令 |
 | `CCACHE_DIR` | `/cannon/ccache` | |
 | `CCACHE_MAXSIZE` | `50G` | |
-| `GOGC` | `30` | 过高会让 `soong_build` 被 OOM 杀掉 |
+| `GOGC` | `100` | Go 默认值；机器 64G，`30` 只会让 runtime 频繁 GC |
 | `BUILD_NUMBER` | `$(date +%Y%m%d)` | |
 | `JOBS` | `$(nproc)` | 内存不足时用 `JOBS=N` 覆盖 |
 

@@ -75,6 +75,8 @@ MAP=(
   "packages_providers_MediaProvider.patch:packages/providers/MediaProvider"
   "system_core.patch:system/core"
   "system_netd.patch:system/netd"                       # netd1shot reboot_on_failure 注释（4.14 调 BPF 期）
+  "system_bpf.patch:system/bpf"                         # bpfloader 4.14 降级（critical 失败不 panic）+ Loader abort 降级
+  "system_sepolicy.patch:system/sepolicy"               # userdebug 放行 crash_dump ptrace bpfloader（拿 tombstone）
   "system_libhidl.patch:system/libhidl"
   "vendor_lineage.patch:vendor/lineage"
   # A17 4.14 非GKI 内核头 sbox 链三补丁（同一 repo/lineage，分文件独立 apply）：

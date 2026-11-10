@@ -57,7 +57,8 @@ cd cannon-build
 | `CANNON_VARIANT` | profile 默认 | 构建变体 |
 | `CANNON_RELEASE` | profile 默认 | release 代号 |
 
-其余变量（`SOONG_NINJA`、`CCACHE_EXEC`、`GOGC` 等）由 `build.sh` 固定，不要临时增删——会改变编译命令指纹，触发全量重编。
+其余变量（`SOONG_NINJA`、`CCACHE_EXEC` 等）由 `build.sh` 固定，不要临时增删——会改变编译命令指纹，触发全量重编。
+`GOGC` 由 `build.sh` 设为 `100`，可用同名环境变量覆盖，不影响指纹。
 
 ## 仓库布局
 

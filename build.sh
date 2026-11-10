@@ -216,10 +216,11 @@ cmd_build() {
     export USE_CCACHE=1
     export CCACHE_EXEC="$(command -v ccache || true)"
     export CCACHE_DIR CCACHE_MAXSIZE=50G
-    export GOGC="${GOGC:-30}"
-    # GOMEMLIMIT 软限制已移除：44GiB 会让 Go runtime 在 40GB+ 堆时疯狂 GC
-    # （memory stall 600~700ms/s），导致全量分析拖到 40 分钟以上。
-    # 不设软限，交给内核 + swap 兜底。
+    # GOGC 用 Go 默认 100。30 是 27G 内存时代为压低 soong_build 峰值堆设的；
+    # 本机 64G，30 只会让 Go runtime 频繁 GC（siso 报 memory stall 500~900ms/s）。
+    export GOGC="${GOGC:-100}"
+    # GOMEMLIMIT 不设：软限低于实际需求时，runtime 会在极限附近疯狂 GC
+    # （44GiB 时 heap 到 40GB+，memory stall 600~700ms/s，全量分析拖到 40 分钟以上）。
     # export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
     export OUT_DIR
 
@@ -277,10 +278,11 @@ cmd_module() {
     export USE_CCACHE=1
     export CCACHE_EXEC="$(command -v ccache || true)"
     export CCACHE_DIR CCACHE_MAXSIZE=50G
-    export GOGC="${GOGC:-30}"
-    # GOMEMLIMIT 软限制已移除：44GiB 会让 Go runtime 在 40GB+ 堆时疯狂 GC
-    # （memory stall 600~700ms/s），导致全量分析拖到 40 分钟以上。
-    # 不设软限，交给内核 + swap 兜底。
+    # GOGC 用 Go 默认 100。30 是 27G 内存时代为压低 soong_build 峰值堆设的；
+    # 本机 64G，30 只会让 Go runtime 频繁 GC（siso 报 memory stall 500~900ms/s）。
+    export GOGC="${GOGC:-100}"
+    # GOMEMLIMIT 不设：软限低于实际需求时，runtime 会在极限附近疯狂 GC
+    # （44GiB 时 heap 到 40GB+，memory stall 600~700ms/s，全量分析拖到 40 分钟以上）。
     # export GOMEMLIMIT="${GOMEMLIMIT:-44GiB}"
     export OUT_DIR
     export BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d)}"
