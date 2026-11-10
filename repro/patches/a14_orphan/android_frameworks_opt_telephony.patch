@@ -1,0 +1,81 @@
+diff -ruN '--exclude=.git' up/android_frameworks_opt_telephony/src/java/com/android/internal/telephony/RIL.java orph/android_frameworks_opt_telephony/src/java/com/android/internal/telephony/RIL.java
+--- up/android_frameworks_opt_telephony/src/java/com/android/internal/telephony/RIL.java	2026-10-31 07:14:24.537828638 +0000
++++ orph/android_frameworks_opt_telephony/src/java/com/android/internal/telephony/RIL.java	2026-10-31 07:14:28.646010761 +0000
+@@ -635,7 +635,7 @@
+             } else {
+                 try {
+                     mRadioProxy = android.hardware.radio.V1_6.IRadio.getService(
+-                            HIDL_SERVICE_NAME[mPhoneId], true);
++                            HIDL_SERVICE_NAME[mPhoneId], false);
+                     mHalVersion.put(HAL_SERVICE_RADIO, RADIO_HAL_VERSION_1_6);
+                 } catch (NoSuchElementException e) {
+                 }
+@@ -643,7 +643,7 @@
+                 if (mRadioProxy == null) {
+                     try {
+                         mRadioProxy = android.hardware.radio.V1_5.IRadio.getService(
+-                                HIDL_SERVICE_NAME[mPhoneId], true);
++                                HIDL_SERVICE_NAME[mPhoneId], false);
+                         mHalVersion.put(HAL_SERVICE_RADIO, RADIO_HAL_VERSION_1_5);
+                     } catch (NoSuchElementException e) {
+                     }
+@@ -652,7 +652,7 @@
+                 if (mRadioProxy == null) {
+                     try {
+                         mRadioProxy = android.hardware.radio.V1_4.IRadio.getService(
+-                                HIDL_SERVICE_NAME[mPhoneId], true);
++                                HIDL_SERVICE_NAME[mPhoneId], false);
+                         mHalVersion.put(HAL_SERVICE_RADIO, RADIO_HAL_VERSION_1_4);
+                     } catch (NoSuchElementException e) {
+                     }
+@@ -867,7 +867,7 @@
+                         mHalVersion.put(service, RADIO_HAL_VERSION_1_6);
+                         serviceProxy.setHidl(mHalVersion.get(service),
+                                 android.hardware.radio.V1_6.IRadio.getService(
+-                                        HIDL_SERVICE_NAME[mPhoneId], true));
++                                        HIDL_SERVICE_NAME[mPhoneId], false));
+                     } catch (NoSuchElementException e) {
+                     }
+                 }
+@@ -878,7 +878,7 @@
+                         mHalVersion.put(service, RADIO_HAL_VERSION_1_5);
+                         serviceProxy.setHidl(mHalVersion.get(service),
+                                 android.hardware.radio.V1_5.IRadio.getService(
+-                                        HIDL_SERVICE_NAME[mPhoneId], true));
++                                        HIDL_SERVICE_NAME[mPhoneId], false));
+                     } catch (NoSuchElementException e) {
+                     }
+                 }
+@@ -889,7 +889,7 @@
+                         mHalVersion.put(service, RADIO_HAL_VERSION_1_4);
+                         serviceProxy.setHidl(mHalVersion.get(service),
+                                 android.hardware.radio.V1_4.IRadio.getService(
+-                                        HIDL_SERVICE_NAME[mPhoneId], true));
++                                        HIDL_SERVICE_NAME[mPhoneId], false));
+                     } catch (NoSuchElementException e) {
+                     }
+                 }
+@@ -2013,6 +2013,23 @@
+         return messageId;
+     }
+ 
++    /**
++     * Converts an {@link ArrayList} of {@link Byte} into a primitive {@code byte[]}.
++     *
++     * <p>This helper existed up to Android 12 and was removed in Android 13/14. It is restored
++     * here because the prebuilt vendor IMS stack ({@code com.mediatek.ims}, built against
++     * Android 12) calls it statically and would otherwise die with {@code NoSuchMethodError}.
++     *
++     * @hide
++     */
++    public static byte[] arrayListToPrimitiveArray(ArrayList<Byte> bytes) {
++        byte[] ret = new byte[bytes.size()];
++        for (int i = 0; i < ret.length; i++) {
++            ret[i] = bytes.get(i);
++        }
++        return ret;
++    }
++
+     @Override
+     public void sendSMSExpectMore(String smscPdu, String pdu, Message result) {
+         RadioMessagingProxy messagingProxy = getRadioServiceProxy(RadioMessagingProxy.class);

@@ -1,0 +1,55 @@
+diff --git a/ci_tests/ci_test_package_zip.go b/ci_tests/ci_test_package_zip.go
+index 7cd03c6..382b387 100644
+--- a/ci_tests/ci_test_package_zip.go
++++ b/ci_tests/ci_test_package_zip.go
+@@ -298,7 +298,12 @@ func extendBuilderCommand(ctx android.ModuleContext, m android.ModuleProxy, buil
+ 		}
+ 
+ 		f := strings.TrimPrefix(installedFile.String(), productOut+"/")
+-		if strings.HasPrefix(f, "out") {
++		// cannon A16: 当 OUT_DIR 位于源码树之外时（如 /cannon/out-a16），
++		// installedFile.String() 为绝对路径，TrimPrefix(productOut) 裁不掉，
++		// 且不再以 "out" 开头，导致 host/中间产物（如 host framework jar）
++		// 被当成相对路径 → validatePathInternal 报 "Path is outside directory"。
++		// 原意是跳过不在 product 分区内的文件，这里补充跳过绝对路径以保持等价语义。
++		if strings.HasPrefix(f, "out") || filepath.IsAbs(f) {
+ 			continue
+ 		}
+ 		if strings.HasPrefix(f, "system/") {
+diff --git a/scripts/check_boot_jars/package_allowed_list.txt b/scripts/check_boot_jars/package_allowed_list.txt
+index 95fe0b3..724444f 100644
+--- a/scripts/check_boot_jars/package_allowed_list.txt
++++ b/scripts/check_boot_jars/package_allowed_list.txt
+@@ -304,3 +304,7 @@ qcom.fmradio
+ ###################################################
+ # IFAA Manager used for Alipay and/or WeChat payment
+ org\.ifaa\.android\.manager.*
++
++# cannon A16-D12: MTK 原厂 bootclasspath jar 含 vendor.xiaomi.* (e.g. vendor.xiaomi.hardware.misys.V1_0)
++vendor\.xiaomi
++vendor\.xiaomi\..*
+diff --git a/scripts/gen_build_prop.py b/scripts/gen_build_prop.py
+index 04ec410..ad5a19d 100644
+--- a/scripts/gen_build_prop.py
++++ b/scripts/gen_build_prop.py
+@@ -209,18 +209,8 @@ def generate_build_info(args):
+   print(f"ro.build.id?={config['BuildId']}")
+ 
+   # ro.build.display.id is shown under Settings -> About Phone
+-  if config["BuildVariant"] != "eng":
+-    # User builds should show:
+-    # release build number or branch.buld_number non-release builds
+-
+-    # Dev. branches should have DISPLAY_BUILD_NUMBER set
+-    if config["DisplayBuildNumber"]:
+-      print(f"ro.build.display.id?={config['BuildId']}.{config['BuildNumber']} {config['BuildKeys']}")
+-    else:
+-      print(f"ro.build.display.id?={config['BuildId']} {config['BuildKeys']}")
+-  else:
+-    # Non-user builds should show detailed build information (See build desc above)
+-    print(f"ro.build.display.id?={config['LineageDesc']}")
++  # cannon: eng/userdebug/user 一律只显示「产品-变体」(如 lineage_cannon-user)，不暴露 eng.root/release-keys 细节
++  print(f"ro.build.display.id?={config['BuildFlavor']}")
+   print(f"ro.build.version.incremental={config['BuildNumber']}")
+   print(f"ro.build.version.sdk={config['Platform_sdk_version']}")
+   print(f"ro.build.version.sdk_full={config['Platform_sdk_version_full']}")

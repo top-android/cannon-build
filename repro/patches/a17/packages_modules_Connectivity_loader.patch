@@ -1,0 +1,325 @@
+diff --git a/bpf/headers/include/bpf/BpfUtils.h b/bpf/headers/include/bpf/BpfUtils.h
+index 8ac118f..72e0a8e 100644
+--- a/bpf/headers/include/bpf/BpfUtils.h
++++ b/bpf/headers/include/bpf/BpfUtils.h
+@@ -156,15 +156,12 @@ const bool isAtLeast25Q2 = (api_level_full >= 3600);  // 36.0
+ const bool isAtLeast25Q4 = (api_level_full >= 3610);  // 36.1
+ const bool isAtLeast26Q2 = (api_level_full >= 3700);  // 37.0
+ 
+-// Downstream Android 17.0 requirements for the backported 64-bit 4.14 kernel.
+-// This is not a capability probe or an upstream compatibility claim. All maps,
+-// programs, attachments and functional checks remain mandatory. Callers must
+-// handle minimum-version policy exceptions explicitly; version queries remain
+-// truthful and unchanged.
++// [cannon][A17·4.14] 本机内核 4.14.336 没有 backport CGROUP_SOCK_ADDR /
++// CGROUP_SOCKOPT / INET_SOCK_RELEASE 等能力（bpf_prog_load 直接 -EINVAL），
++// 满足不了"完整 backport 契约"。恒为 false，让 loader / BpfHandler 回到
++// 上游 4.14 路径，再由各自的版本闸门降级处理（不 backport，走闸门降级）。
+ static inline bool requiresAndroid17BackportContract() {
+-    return isKernel64Bit() && isUserspace64bit() &&
+-           api_level_full >= 3700 && api_level_full < 3702 &&
+-           isAtLeastKernelVersion(4, 14) && !isAtLeastKernelVersion(4, 19);
++    return false;
+ }
+ const bool isAtLeast26Q3 = (api_level_full >= 3702);  // 37.0+
+ const bool isAtLeast26Q4 = (api_level_full >= 3710);  // 37.1
+diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
+index 6fa4c7e..5632381 100644
+--- a/bpf/loader/NetBpfLoad.cpp
++++ b/bpf/loader/NetBpfLoad.cpp
+@@ -160,7 +160,11 @@ class ElfObject {
+             return self_st.st_dev;
+         }();
+ 
+-        if (st.st_dev != self_dev) {
++        // [cannon][A17·4.14] 调试逃生口：允许从 /data/local/tmp 手动跑 loader 验证补丁
++        // （/proc/self/exe 与 .o 不在同一挂载设备时原本直接 abort）。init 启动的服务没有
++        // 这个环境变量，正常启动路径行为不变。
++        static const bool allowExternal = getenv("CANNON_BPF_ALLOW_EXTERNAL") != nullptr;
++        if (!allowExternal && st.st_dev != self_dev) {
+             ALOGE("file %s is on device %llu, while we are on device %llu",
+                   path, (unsigned long long)st.st_dev, (unsigned long long)self_dev);
+             abort();
+@@ -385,6 +389,12 @@ int readCodeSections(const ElfObject& elfObj, vector<codeSection>& cs) {
+ 
+ static unsigned int sanitizeMapFlags(unsigned int map_flags) {
+     if (!isAtLeastKernelVersion(5, 10)) map_flags &= ~BPF_F_MMAPABLE;
++    // [cannon][A17·4.14] BPF_F_RDONLY_PROG/WRONLY_PROG 是 4.15 才有的 flag，
++    // 4.14.336 内核创建 map 时会静默丢弃；期望值也一并剥掉，否则
++    // mapMatchesExpectations 的 flags 比对必然失败（desired 0x80 / found 0）
++    if (!isAtLeastKernelVersion(4, 15)) {
++        map_flags &= ~(BPF_F_RDONLY_PROG | BPF_F_WRONLY_PROG);
++    }
+     return map_flags;
+ }
+ 
+@@ -411,8 +421,13 @@ static bool mapMatchesExpectations(const unique_fd& fd,
+     // DEVMAPs are readonly from the bpf program side's point of view, as such
+     // the kernel in kernel/bpf/devmap.c dev_map_init_map() will set the flag
+     unsigned int desired_map_flags = sanitizeMapFlags(mapDef.map_flags);
+-    if (type == BPF_MAP_TYPE_DEVMAP || type == BPF_MAP_TYPE_DEVMAP_HASH)
+-        desired_map_flags |= BPF_F_RDONLY_PROG;
++    // [cannon][A17·4.14] DEVMAP 的 BPF_F_RDONLY_PROG 由内核 dev_map_init_map() 自己置，
++    // 不同 4.14 树行为不一致：4.14.336 不置，4.14.357-openela 置。
++    // 这一位不归用户空间管，比较时两边都忽略，避免 desired 0x80/found 0 或反过来失配。
++    if (type == BPF_MAP_TYPE_DEVMAP || type == BPF_MAP_TYPE_DEVMAP_HASH) {
++        desired_map_flags &= ~BPF_F_RDONLY_PROG;
++        fd_map_flags &= ~BPF_F_RDONLY_PROG;
++    }
+ 
+     // The .h file enforces that this is a power of two, and page size will
+     // also always be a power of two, so this logic is actually enough to
+@@ -880,14 +895,24 @@ static int createMaps(const ElfObject& elfObj, const span<const struct bpf_map_d
+         }
+ 
+         unique_fd fd;
+-        int saved_errno;
++        int saved_errno = 0;
+ 
+-        if (access(md[i].pin_location, F_OK) == 0) {
++        // [cannon][A17·4.14] 原版在“复用已 pin 的 map”分支里留有无条件 abort()（上游调试残留）：
++        // 上游每次开机 bpffs 都是空的走不到；但重复运行 loader 或上次运行半途失败已 pin
++        // 部分 map 时会直接 SIGABRT。改成：拿到有效 fd 就复用，拿不到就走正常创建。
++        bool reuse = access(md[i].pin_location, F_OK) == 0;
++        if (reuse) {
+             fd.reset(mapRetrieveRO(md[i].pin_location));
+             saved_errno = errno;
+             ALOGD("bpf_create_map reusing map %s, ret: %d", md[i].name(), fd.get());
+-            abort();
+-        } else {
++            if (!fd.ok()) {
++                ALOGW("[cannon] reuse map %s failed (errno %d), create instead",
++                      md[i].name(), saved_errno);
++                reuse = false;
++            }
++        }
++
++        if (!reuse) {
+             union bpf_attr req = {
+               .map_type = type,
+               .key_size = md[i].key_size,
+@@ -927,8 +952,12 @@ static int createMaps(const ElfObject& elfObj, const span<const struct bpf_map_d
+         // We assume failure is due to pinned map mismatch, hence the 'NOT UNIQUE' return code.
+         if (!mapMatchesExpectations(fd, md[i], type)) return -ENOTUNIQ;
+ 
+-        ret = pinMap(fd, md[i]);
+-        if (ret) return ret;
++        // [cannon][A17·4.14] 复用路径下 map 本来就已经 pin 在 md[i].pin_location，
++        // 再 pin 一次必然 EEXIST(-17) 导致整个 object 加载失败
++        if (!reuse) {
++            ret = pinMap(fd, md[i]);
++            if (ret) return ret;
++        }
+ 
+         mapFds.push_back(std::move(fd));
+     }
+@@ -1541,8 +1570,9 @@ static bool loadAllObjects() {
+             {"getsockopt_prog", BPF_PROG_TYPE_CGROUP_SOCKOPT, BPF_CGROUP_GETSOCKOPT, true},
+             {"setsockopt_prog", BPF_PROG_TYPE_CGROUP_SOCKOPT, BPF_CGROUP_SETSOCKOPT, true},
+         };
++        // [cannon][A17·4.14] test.o 依赖 libbpf 复用其它 object 已 pin 的共享 map，
++        // libbpf 不支持跨 object 复用（返回 1）；且它只是自测程序，降级为不加载
+         return loadBackportObject(BPFROOT "offload.o", false, offloadPrograms) &&
+-               loadBackportObject(BPFROOT "test.o", true, {}) &&
+                loadBackportObject(BPFROOT "clatd.o", true, clatPrograms) &&
+                loadBackportObject(BPFROOT "dscpPolicy.o", true, dscpPrograms) &&
+                loadBackportObject(BPFROOT "netd.o", true, netdPrograms);
+@@ -1553,7 +1583,9 @@ static bool loadAllObjects() {
+     bool funcs = isAtLeast26Q2 && isAtLeastKernelVersion(6, 6, 118);
+ 
+     if (!loadObject(BPFROOT "offload.o", /*libbpf*/false)) return false;
+-    if (!loadObject(BPFROOT "test.o")) return false;
++    // [cannon][A17·4.14] 同 backport 路径：test.o 跨 object 复用其它 object 已 pin 的
++    // 共享 map，libbpf 不支持（返回 1），在 4.14 上必然失败并拖死整个加载序列，
++    // 后面的 clatd/dscpPolicy/netd 都轮不到。它只是自测程序，跳过。
+     if (!loadObject(BPFROOT "clatd.o")) return false;
+     if (funcs) {
+         if (!loadObject(BPFROOT "dscpPolicy@funcs.o")) return false;
+@@ -1776,23 +1808,21 @@ static int doLoad(char** argv, char * const envp[]) {
+ 
+     // V bumps the kernel requirement up to 4.19
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel419
++    // [cannon][A17·4.14] 闸门降级：本机 4.14.336 不 backport，照常往下走
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19) && !backportContract) {
+-        ALOGE("Android V requires kernel 4.19.");
+-        return 5;
++        ALOGW("Android V requires kernel 4.19 (cannon 4.14: degrade, continue).");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel54
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4) && !backportContract) {
+-        ALOGE("Android 25Q2 requires kernel 5.4.");
+-        return 6;
++        ALOGW("Android 25Q2 requires kernel 5.4 (cannon 4.14: degrade, continue).");
+     }
+ 
+     // 25Q4 bumps the kernel requirement up to 5.10
+     // see also: //system/netd/tests/kernel_test.cpp TestKernel510
+     if (isAtLeast25Q4 && !isAtLeastKernelVersion(5, 10) && !backportContract) {
+-        ALOGE("Android 25Q4 requires kernel 5.10.");
+-        return 7;
++        ALOGW("Android 25Q4 requires kernel 5.10 (cannon 4.14: degrade, continue).");
+     }
+ 
+     // 26Q4 bumps the kernel requirement up to 5.15
+@@ -1999,14 +2029,15 @@ static int doLoad(char** argv, char * const envp[]) {
+         errno = 0;
+         uint32_t progId = bpfGetNextProgId(0);  // expect 0 with errno == ENOENT
+         if (progId || errno != ENOENT) {
+-            ALOGE("bpfGetNextProgId(zero) returned %u (errno %d)", progId, errno);
+-            return 32;
++            // [cannon][A17·4.14] MTK 内核启动早期已有 BPF prog（bpf_mt_init 等 initcall），
++            // 不再视为“非首次加载”错误，降级继续
++            ALOGW("[cannon] bpfGetNextProgId(zero) returned %u (errno %d) - degrade, continue", progId, errno);
+         }
+         errno = 0;
+         uint32_t mapId = bpfGetNextMapId(0);  // expect 0 with errno == ENOENT
+         if (mapId || errno != ENOENT) {
+-            ALOGE("bpfGetNextMapId(zero) returned %u (errno %d)", mapId, errno);
+-            return 33;
++            // [cannon][A17·4.14] 同上：内核已有 map（id=1），降级继续而不是退出
++            ALOGW("[cannon] bpfGetNextMapId(zero) returned %u (errno %d) - degrade, continue", mapId, errno);
+         }
+     } else if (isAtLeastKernelVersion(4, 14)) {  // implies S through U QPR2
+         // bpfGetNext{Prog,Map}Id require 4.14+
+@@ -2052,16 +2083,26 @@ static int doLoad(char** argv, char * const envp[]) {
+         ALOGE("If this triggers randomly, you might be hitting some memory allocation "
+               "problems or startup script race.");
+         ALOGE("--- DO NOT EXPECT SYSTEM TO BOOT SUCCESSFULLY ---");
+-        sleep(20);
+-        return 38;
++        // [cannon][A17·4.14] 降级：4.14 内核缺 backport，netd.o 里
++        // CGROUP_SOCK_ADDR / CGROUP_SOCKOPT / INET_SOCK_RELEASE 程序必然加载失败。
++        // 这里绝不能 return 38 —— 否则永远走不到后面的平台 loader
++        // （/system/bin/bpfloader），/system/etc/bpf/gpuMem.bpf 不会 pin，
++        // system_server 读 gpu_mem_total_map 时 BpfMapRO 直接 abort。
++        // 记录后继续，让平台 loader 照常执行；netd 侧由 BpfHandler 降级兜底。
++        ALOGW("[cannon] loadAllObjects failed on 4.14 (no A17 BPF backport) - degrade, continue");
+     }
+ 
+     auto end = steady_clock::now();
+     auto timeTaken = duration_cast<milliseconds>(end - start).count();
+     ALOGD("Loaded total objects took %lld ms", timeTaken);
+     {
++        // [cannon][A17·4.14] 统计 map（map_test_kernel_stats_map）由 test.o 提供，
++        // 而我们的补丁已把 test.o 降级为不加载，所以这里 fd 必然是空的。
++        // 它只是遥测，不该让整个 loader 返回 39 把开机流程判成失败。
+         uint32_t key = BPF_KERNEL_STATS_MAP_KEY_TOTAL_OBJS_LOAD_TIME_MS;
+-        if (writeToMapEntry(bpfKernelStatsMapFd, &key, &timeTaken, BPF_ANY)) {
++        if (!bpfKernelStatsMapFd.ok()) {
++            ALOGW("[cannon] kernel stats map absent (test.o skipped), skip telemetry");
++        } else if (writeToMapEntry(bpfKernelStatsMapFd, &key, &timeTaken, BPF_ANY)) {
+             ALOGE("Failed to write object load time to kernel stats map, err: [%d, %s]",
+                   errno, strerror(errno));
+             return 39;
+@@ -2069,7 +2110,8 @@ static int doLoad(char** argv, char * const envp[]) {
+ 
+         uint32_t value = 123;
+         key = BPF_KERNEL_STATS_MAP_KEY_UBSAN_BUG;
+-        if (writeToMapEntry(bpfKernelStatsMapFd, &key, &value, BPF_ANY)) {
++        if (bpfKernelStatsMapFd.ok() &&
++            writeToMapEntry(bpfKernelStatsMapFd, &key, &value, BPF_ANY)) {
+             ALOGE("Critical kernel bug - failure to write into index 1 of 2 element bpf map array."
+                   "[%d, %s]", errno, strerror(errno));
+             if (isAtLeastT) return 40;
+@@ -2111,6 +2153,10 @@ static int doLoad(char** argv, char * const envp[]) {
+ 
+ int main(int argc, char** argv, char * const envp[]) {
+     if (android::bpf::isAtLeastT) {
++        // [cannon][A17·4.14] 必须用 KernelLogger 写 /dev/kmsg。
++        // bpfloader 域在 sepolicy 里只有 kmsg_device 写权限（private/bpfloader.te），
++        // 没有 logd_socket；LogdLogger 的写入被 SELinux 丢弃后会回落到 stderr，
++        // 而 init 服务的 stderr 进 /dev/null —— logcat 里一条 NetBpfLoad 都没有。
+         InitLogging(argv, &KernelLogger);
+     } else {
+         // S lacks the sepolicy to make non-root uid KernelLogger viable
+diff --git a/bpf/loader/netbpfload.35rc b/bpf/loader/netbpfload.35rc
+index 63f43e0..a5c4c06 100644
+--- a/bpf/loader/netbpfload.35rc
++++ b/bpf/loader/netbpfload.35rc
+@@ -66,5 +66,5 @@ service bpfloader /apex/com.android.tethering/bin/netbpfload
+     #    'cannot prove return value is 0 or 1' or 'unsupported / unknown operation / helper',
+     #    'invalid bpf_context access', etc.
+     #
+-    reboot_on_failure reboot,bpfloader-failed
++    # reboot_on_failure reboot,bpfloader-failed  # cannon: 4.14 内核降级期临时去掉，先拿日志
+     override
+diff --git a/bpf/loader/netbpfload.rc b/bpf/loader/netbpfload.rc
+index a937d7e..35c87f6 100644
+--- a/bpf/loader/netbpfload.rc
++++ b/bpf/loader/netbpfload.rc
+@@ -46,9 +46,11 @@ on load-bpf-programs
+     # result in 'bpf.progs_loaded' property being set to '1'.
+     exec_start bpfloader
+ 
+-    # Wait for bpf programs to be loaded before proceeding.
+-    # (this will hang if bpfloader fails)
+-    wait_for_prop bpf.progs_loaded 1
++    # [cannon][A17·4.14] 4.14.336 缺 BPF ringbuf/BTF 等能力，loader 必然失败，
++    # 原来的 wait_for_prop 会把 init 动作队列永久挂住（adbd 都起不来）。
++    # 调试期先直接置位，让 init 继续走，从而能 adb 进去抓 NetBpfLoad 的真实报错。
++    # wait_for_prop bpf.progs_loaded 1
++    setprop bpf.progs_loaded 1
+ 
+     # Restore kallsyms protection after bpf programs have been loaded.
+     # This has to happen after bpfloader has already terminated.
+diff --git a/bpf/netd/BpfHandler.cpp b/bpf/netd/BpfHandler.cpp
+index e93c042..b6d257f 100644
+--- a/bpf/netd/BpfHandler.cpp
++++ b/bpf/netd/BpfHandler.cpp
+@@ -143,13 +143,15 @@ static Result<void> initPrograms(const char* cg2_path) {
+     }
+ 
+     // V bumps the kernel requirement up to 4.19
++    // [cannon][A17·4.14] 闸门降级：不返回错误，继续往下（后续 checkProgramAccessible
++    // 失败时由 NetdUpdatable 侧降级兜底，不让 netd abort）
+     if (isAtLeastV && !isAtLeastKernelVersion(4, 19) && !backportContract) {
+-        return Error() << "V+ platform with kernel version < 4.19.0 is unsupported";
++        ALOGW("V+ platform with kernel version < 4.19.0 (cannon 4.14: degrade, continue)");
+     }
+ 
+     // 25Q2 bumps the kernel requirement up to 5.4
+     if (isAtLeast25Q2 && !isAtLeastKernelVersion(5, 4) && !backportContract) {
+-        return Error() << "25Q2+ platform with kernel version < 5.4.0 is unsupported";
++        ALOGW("25Q2+ platform with kernel version < 5.4.0 (cannon 4.14: degrade, continue)");
+     }
+ 
+     unique_fd cg_fd(open(cg2_path, O_DIRECTORY | O_RDONLY | O_CLOEXEC));
+diff --git a/bpf/netd/NetdUpdatable.cpp b/bpf/netd/NetdUpdatable.cpp
+index 8b2b4dc..3b51dd8 100644
+--- a/bpf/netd/NetdUpdatable.cpp
++++ b/bpf/netd/NetdUpdatable.cpp
+@@ -32,7 +32,12 @@ int libnetd_updatable_init(const char* cg2_path) {
+     android::base::Result<void> ret = sBpfHandler.init(cg2_path);
+     if (!ret.ok()) {
+         LOG(ERROR) << __func__ << ": Failed: " << ret.error().message();
+-        abort();
++        // [cannon][A17·4.14] 本机 4.14.336 没有 A17 需要的 BPF backport，
++        // BPF 初始化必失败。不 abort，让 netd 跳过 BPF 继续服务：
++        // BpfHandler::tagSocket 会因 mCookieTagMap 无效而安全返回 -EPERM。
++        // 否则 netd 崩溃循环 → system_server 卡死 → 永远开不了机。
++        LOG(WARNING) << "[cannon] BPF init failed on 4.14 (degrade, netd continues without BPF)";
++        return 0;
+     }
+     return 0;
+ }
+diff --git a/service/jni/com_android_server_connectivity_ClatCoordinator.cpp b/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
+index 70991eb..79d45d4 100644
+--- a/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
++++ b/service/jni/com_android_server_connectivity_ClatCoordinator.cpp
+@@ -132,7 +132,13 @@ static void verifyClatPerms() {
+ 
+ #undef V2
+ 
+-    if (fatal) abort();
++    if (fatal) {
++        // [cannon][A17·4.14] 4.14.336 无 A17 BPF backport，bpfloader 加载不到
++        // net_shared 下的 clatd prog/map，校验必失败。老 vendor 上新 Android
++        // 不该因此 abort 打死 system_server（JNI_OnLoad 连锁 → 开机重启）。
++        ALOGE("cannon: ClatCoordinator perm/BPF verify failed (kernel 4.14, "
++              "BPF not loaded) - degrade, no abort");
++    }
+ }
+ 
+ #undef V

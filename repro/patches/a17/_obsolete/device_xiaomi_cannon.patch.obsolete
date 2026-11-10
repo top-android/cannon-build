@@ -1,0 +1,97 @@
+diff --git a/BoardConfig.mk b/BoardConfig.mk
+index fb064ec..007ad0c 100644
+--- a/BoardConfig.mk
++++ b/BoardConfig.mk
+@@ -56,6 +56,11 @@ BOARD_MKBOOTIMG_ARGS += --tags_offset $(BOARD_KERNEL_TAGS_OFFSET)
+ BOARD_MKBOOTIMG_ARGS += --dtb $(BOARD_PREBUILT_DTBIMAGE)
+ TARGET_KERNEL_CONFIG := cannon_defconfig
+ TARGET_KERNEL_SOURCE := kernel/xiaomi/cannon
++# A17 树内 kernel.mk 引用 $(KERNEL_CROSS_COMPILE) 但该 Lineage 树未定义它（A15/A16
++# 走独立内核仓不经过此路径）。留空会让 clang 不带 --target，vDSO 退化成主机 x86_64
++# 而报 “unsupported option '-ffixed-x18' for target 'x86_64'”。必须用 gnu 三元组：
++# aarch64-linux-android- 会触发 scripts/clang-android.sh 的 __ANDROID__ 报错。
++KERNEL_CROSS_COMPILE := CROSS_COMPILE=aarch64-linux-gnu-
+ 
+ # Partitions
+ BOARD_FLASH_BLOCK_SIZE := 131072 # (BOARD_KERNEL_PAGESIZE * 64)
+diff --git a/device.mk b/device.mk
+index 0babf50..652d0b3 100644
+--- a/device.mk
++++ b/device.mk
+@@ -142,13 +142,16 @@ PRODUCT_PACKAGES += \
+     libxml2.vendor
+ 
+ # ConsumerIr
+-PRODUCT_PACKAGES += \
+-    android.hardware.ir@1.0-impl:64 \
+-    android.hardware.ir@1.0-service
++# [cannon][A17] A17 已移除 HIDL android.hardware.ir@1.0（hardware/interfaces/ir 改为 AIDL-only）；
++# cannon 无 IR 发射硬件，不再声明该 HIDL 包（否则 kati 报 non-existent module 直接 fail）。
++# PRODUCT_PACKAGES += \
++#     android.hardware.ir@1.0-impl:64 \
++#     android.hardware.ir@1.0-service
+ 
+ # ConfigStore
+-PRODUCT_PACKAGES += \
+-    disable_configstore
++# [cannon][A17] A17 已无 disable_configstore 模块（旧 A15/A16 用于禁用 ConfigStore 的占位包）。
++# PRODUCT_PACKAGES += \
++#     disable_configstore
+ 
+ # Display
+ # A16-D7: memtrack 源码 HAL 在 A16 更名为 android.hardware.memtrack-service.mediatek
+@@ -289,19 +292,41 @@ PRODUCT_PACKAGES += \
+ PRODUCT_ENFORCE_RRO_TARGETS := *
+ 
+ # Mediatek
+-# 2026-10-27 IMS：mediatek-telephony-common（boot jar）里直接引用
+-# mediatek-ims-base 的类（com/mediatek/ims/internal/IMtkImsService、MtkImsManager…），
+-# 但 mediatek-ims-base/-common 之前只装进 /system/framework、没进 boot classpath，
+-# 运行到 IMS 路径就 NoClassDefFound。原厂 bootclasspath.pb 里这三个都在。
+-PRODUCT_BOOT_JARS += \
+-    mediatek-common \
+-    mediatek-framework \
+-    mediatek-services \
+-    mediatek-telecom-common \
+-    mediatek-telephony-common \
+-    mediatek-telephony-base \
+-    mediatek-ims-common \
+-    mediatek-ims-base
++# [cannon][A17] A16 期(2026-10-27)曾把下面 8 个 vendor jar 放进 PRODUCT_BOOT_JARS 修 IMS
++# NoClassDefFound。但 A17 的 AOSP telephony 已重构为 data 包新架构：删除了
++# dataconnection.{DataConnection,DcTracker,ApnContext,ApnSettingUtils,TelephonyNetworkFactory…}、
++# cdma.CdmaMmiCode、cat.RilMessage、SubscriptionController 等，且 GsmMmiCode/GsmSMSDispatcher/
++# ImsPhoneMmiCode/uicc.*FileHandler 等被改为 final。vendor blob 里大量 MtkXxx extends 这些
++# 旧/final 类 → 编入 boot image 会被 dex2oat --abort-on-hard-verifier-error 硬失败
++# (首个报错 MtkGsmMmiCode extends final GsmMmiCode；boot-apache-xml.art 等一并 fail)。
++# 实测(2026-11-03)：A17 所有 AOSP boot jar 对 com/mediatek 引用数=0(连反射字符串都 0)，
++# 说明 A17 framework 不依赖这些 jar；它们仍由 cannon-vendor.mk PRODUCT_PACKAGES 装到
++# /system/framework(dex_import；其 dexpreopt 由下方 PRODUCT_DEX_PREOPT_MODULE_CONFIGS=disable 关闭)。故 A17 不再放 boot classpath。
++# [待验证] 运行期若 MTK IMS/telephony 服务需要某 mediatek 类，再按需单独加载处理。
++# PRODUCT_BOOT_JARS += \
++#     mediatek-common \
++#     mediatek-framework \
++#     mediatek-services \
++#     mediatek-telecom-common \
++#     mediatek-telephony-common \
++#     mediatek-telephony-base \
++#     mediatek-ims-common \
++#     mediatek-ims-base
++
++# [cannon][A17] vendor mediatek/hotword/nxp 等 dex_import 与 A17 重构后的 AOSP 类不兼容
++# (多类 final/删除，首个 MtkGsmMmiCode extends final GsmMmiCode)，被单独 dexpreopt 时
++# dex2oat --abort-on-hard-verifier-error 硬验证失败。用官方产品变量把模块级 dexpreopt 关掉：
++# PRODUCT_DEX_PREOPT_MODULE_CONFIGS 的 <模块>=disable 经 build/make/core/product_config.mk:468
++# 汇入 DEXPREOPT_DISABLED_MODULES → dex_preopt_config.mk:87 DisablePreoptModules →
++# build/soong/dexpreopt/dexpreopt.go:122 按模块名跳过 dex2oat(不再产/装 odex)。
++# 运行期 jar 仍由 cannon-vendor.mk 装到 /system/framework，仅首次加载稍慢。
++# 注：dex_import 模块类型不支持 dex_preopt 属性(会报 unrecognized property)，故必须走这里。
++$(call add-product-dex-preopt-module-config, \
++    mediatek-common mediatek-framework mediatek-services \
++    mediatek-telecom-common mediatek-telephony-common mediatek-telephony-base \
++    mediatek-ims-base mediatek-ims-common mediatek-ims-extension-plugin \
++    mediatek-ims-legacy mediatek-wfo-legacy \
++    com.nxp.sems com.android.hotwordenrollment.common.util, disable)
+ 
+ # Power
+ PRODUCT_COPY_FILES += \

@@ -1,0 +1,21 @@
+diff --git a/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java b/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java
+index 3c3b804..0dedaf0 100644
+--- a/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java
++++ b/libs/WifiTrackerLib/src/com/android/wifitrackerlib/WifiPickerTracker.java
+@@ -335,6 +335,16 @@ public class WifiPickerTracker extends BaseWifiTracker {
+     protected void handleWifiStateChangedAction() {
+         if (getWifiState() == WifiManager.WIFI_STATE_DISABLED) {
+             clearAllWifiEntries();
++        } else {
++            // cannon实验D: 开 WiFi 时从内存 scan 历史(mScanResultUpdater)重绘列表，复刻 A13 语义
++            // （否则开 WiFi 不读缓存 → 必然等一次新全扫 = 冷启动）。MAX_SCAN_AGE 保持 15s 不动。
++            // A16 漂移：上游把方法签名从 (boolean lastScanSucceeded) 改为
++            // (boolean pollScans, boolean timeoutScans)。按上游自身映射规律 lastScanSucceeded=X
++            // → (pollScans=X, timeoutScans=X)，此处原为 true，故传 (true, true)：
++            // pollScans=true 取框架缓存扫描结果并重绘；timeoutScans=true 用正常 15s 老化窗
++            // （onScanResultsAvailable 内 timeoutScans?mMaxScanAgeMillis:MAX_SCAN_AGE_FOR_FAILED_SCAN_MS，
++            //  与原 A15 lastScanSucceeded=true 走正常窗等价）。
++            conditionallyUpdateScanResults(true /* pollScans */, true /* timeoutScans */);
+         }
+         updateWifiEntries();
+     }

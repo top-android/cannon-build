@@ -1,0 +1,12 @@
+diff --git a/cannon-vendor.mk b/cannon-vendor.mk
+index 255ccdf..955dbba 100644
+--- a/cannon-vendor.mk
++++ b/cannon-vendor.mk
+@@ -1531,7 +1531,6 @@ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/dumpsys:$(TARGET_COPY_OUT_VENDOR)/bin/dumpsys \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.audio.service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.audio.service \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.3-service.xiaomi:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.biometrics.fingerprint@2.3-service.xiaomi \
+-    vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.cas@1.2-service-lazy:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.cas@1.2-service-lazy \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.drm-service.clearkey:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.drm-service.clearkey \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.gatekeeper@1.0-service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.gatekeeper@1.0-service \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.graphics.composer@2.1-service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.graphics.composer@2.1-service \

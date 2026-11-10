@@ -1,0 +1,211 @@
+diff -ruN '--exclude=.git' up/android_packages_modules_Bluetooth/android/app/src/com/android/bluetooth/a2dp/A2dpService.java orph/android_packages_modules_Bluetooth/android/app/src/com/android/bluetooth/a2dp/A2dpService.java
+--- up/android_packages_modules_Bluetooth/android/app/src/com/android/bluetooth/a2dp/A2dpService.java	2026-10-31 07:15:00.227413095 +0000
++++ orph/android_packages_modules_Bluetooth/android/app/src/com/android/bluetooth/a2dp/A2dpService.java	2026-10-31 07:15:07.344729671 +0000
+@@ -560,6 +560,13 @@
+                 if (Objects.equals(device, mActiveDevice)) {
+                     Log.i(TAG, "setActiveDevice(" + device + "): current is " + mActiveDevice
+                             + " no changed");
++                    // Re-notify AudioManager so the audio policy (re)registers the A2DP
++                    // output device. On some vendor stacks the initial activation
++                    // notification is lost, leaving the A2DP device unregistered in the
++                    // audio policy (audio keeps playing on speaker). previous==null makes
++                    // the framework treat this as "device became active" (idempotent).
++                    mAudioManager.handleBluetoothActiveDeviceChanged(device, null,
++                            BluetoothProfileConnectionInfo.createA2dpInfo(true, -1));
+                     // returns true since the device is activated even double attempted
+                     return true;
+                 }
+diff -ruN '--exclude=.git' up/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/Android.bp orph/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/Android.bp
+--- up/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/Android.bp	2026-10-31 07:15:00.287415763 +0000
++++ orph/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/Android.bp	2026-10-31 07:15:07.402732251 +0000
+@@ -36,6 +36,13 @@
+     ],
+     header_libs: ["libhardware_headers"],
+     shared_libs: [
++        // 2026-10-27: 把 AIDL 蓝牙音频 provider 注册进音频 HAL 服务进程。
++        // BluetoothAudioSession 的会话状态是进程内的，provider 必须和
++        // audio.bluetooth.default 同进程，否则 BluetoothAudioPortAidlOut
++        // 永远看不到 ready 的会话（IsSessionReady() == false）。
++        // AOSP 的 AIDL 音频 HAL 就是这么做的，见
++        // hardware/interfaces/audio/aidl/default/bluetooth/ModuleBluetooth.cpp
++        "android.hardware.bluetooth.audio-impl",
+         "libaudioutils",
+         "libbase",
+         "libbinder_ndk",
+diff -ruN '--exclude=.git' up/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/audio_bluetooth_hw.cc orph/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/audio_bluetooth_hw.cc
+--- up/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/audio_bluetooth_hw.cc	2026-10-31 07:15:00.287415763 +0000
++++ orph/android_packages_modules_Bluetooth/system/audio_bluetooth_hw/audio_bluetooth_hw.cc	2026-10-31 07:15:07.402732251 +0000
+@@ -17,15 +17,32 @@
+ #define LOG_TAG "BTAudioHw"
+ 
+ #include <android-base/logging.h>
++#include <android/binder_status.h>
+ #include <hardware/hardware.h>
+ #include <log/log.h>
+ #include <malloc.h>
+ #include <string.h>
+ #include <system/audio.h>
+ 
++#include <mutex>
++
+ #include "stream_apis.h"
+ #include "utils.h"
+ 
++// 2026-10-27: AOSP 的 AIDL 音频 HAL 在音频 HAL 服务进程里注册蓝牙音频
++// provider（hardware/interfaces/audio/aidl/default/bluetooth/ModuleBluetooth.cpp
++// 里那个 TODO(b/312265159) 就是同一件事）。原因是
++// libbluetooth_audio_session_aidl 的会话状态是进程内静态变量：
++// BluetoothAudioSessionReport::OnSessionStarted() 只会写本进程的
++// BluetoothAudioSession 实例。如果 provider 跑在独立进程里，
++// audio.bluetooth.default 里的 BluetoothAudioPortAidlOut 永远拿到
++// IsSessionReady()==false，open_output_stream 返回 -EINVAL，
++// AudioPolicyManager 随后 -ENODEV 放弃 A2DP 输出，声音留在扬声器。
++// MTK 的 android.hardware.audio.service 里虽然静态链了
++// android.hardware.bluetooth.audio-impl，但从未调用这个入口，
++// 所以只能由我们在模块被 open 时补上。
++extern "C" binder_status_t createIBluetoothAudioProviderFactory();
++
+ using ::android::bluetooth::audio::utils::GetAudioParamString;
+ using ::android::bluetooth::audio::utils::ParseAudioParams;
+ 
+@@ -173,6 +190,17 @@
+   LOG(VERBOSE) << __func__ << ": name=[" << name << "]";
+   if (strcmp(name, AUDIO_HARDWARE_INTERFACE) != 0) return -EINVAL;
+ 
++  // Register the AIDL Bluetooth audio provider factory in this process, so
++  // that the provider and this HAL module share one BluetoothAudioSession
++  // instance (see the comment next to the declaration above).
++  static std::once_flag provider_registered;
++  std::call_once(provider_registered, [] {
++    binder_status_t status = createIBluetoothAudioProviderFactory();
++    LOG(INFO) << "createIBluetoothAudioProviderFactory status=" << status
++              << " (0 means IBluetoothAudioProviderFactory/default registered"
++              << " in this process)";
++  });
++
+   auto bluetooth_audio_device = new BluetoothAudioDevice{};
+   struct audio_hw_device* adev = &bluetooth_audio_device->audio_device_;
+   if (!adev) return -ENOMEM;
+diff -ruN '--exclude=.git' up/android_packages_modules_Bluetooth/system/audio_hal_interface/aidl/client_interface_aidl.cc orph/android_packages_modules_Bluetooth/system/audio_hal_interface/aidl/client_interface_aidl.cc
+--- up/android_packages_modules_Bluetooth/system/audio_hal_interface/aidl/client_interface_aidl.cc	2026-10-31 07:15:00.287415763 +0000
++++ orph/android_packages_modules_Bluetooth/system/audio_hal_interface/aidl/client_interface_aidl.cc	2026-10-31 07:15:07.406732429 +0000
+@@ -78,7 +78,7 @@
+     return capabilities;
+   }
+   auto provider_factory = IBluetoothAudioProviderFactory::fromBinder(
+-      ::ndk::SpAIBinder(AServiceManager_waitForService(
++      ::ndk::SpAIBinder(AServiceManager_checkService(
+           kDefaultAudioProviderFactoryInterface.c_str())));
+ 
+   if (provider_factory == nullptr) {
+@@ -107,7 +107,7 @@
+ 
+   if (provider_factory == nullptr) {
+     provider_factory = IBluetoothAudioProviderFactory::fromBinder(
+-        ::ndk::SpAIBinder(AServiceManager_waitForService(
++        ::ndk::SpAIBinder(AServiceManager_checkService(
+             kDefaultAudioProviderFactoryInterface.c_str())));
+   }
+ 
+@@ -191,7 +191,7 @@
+     LOG(WARNING) << __func__ << ": refetch";
+   }
+   auto provider_factory = IBluetoothAudioProviderFactory::fromBinder(
+-      ::ndk::SpAIBinder(AServiceManager_waitForService(
++      ::ndk::SpAIBinder(AServiceManager_checkService(
+           kDefaultAudioProviderFactoryInterface.c_str())));
+ 
+   if (provider_factory == nullptr) {
+diff -ruN '--exclude=.git' up/android_packages_modules_Bluetooth/system/audio_hal_interface/hal_version_manager.cc orph/android_packages_modules_Bluetooth/system/audio_hal_interface/hal_version_manager.cc
+--- up/android_packages_modules_Bluetooth/system/audio_hal_interface/hal_version_manager.cc	2026-10-31 07:15:00.291415941 +0000
++++ orph/android_packages_modules_Bluetooth/system/audio_hal_interface/hal_version_manager.cc	2026-10-31 07:15:07.406732429 +0000
+@@ -75,7 +75,7 @@
+   static auto aidl_version = []() -> BluetoothAudioHalVersion {
+     int version = 0;
+     auto provider_factory = IBluetoothAudioProviderFactory::fromBinder(
+-        ::ndk::SpAIBinder(AServiceManager_waitForService(
++        ::ndk::SpAIBinder(AServiceManager_checkService(
+             kDefaultAudioProviderFactoryInterface.c_str())));
+ 
+     if (provider_factory == nullptr) {
+diff -ruN '--exclude=.git' up/android_packages_modules_Bluetooth/system/gd/hal/hci_hal_android_hidl.cc orph/android_packages_modules_Bluetooth/system/gd/hal/hci_hal_android_hidl.cc
+--- up/android_packages_modules_Bluetooth/system/gd/hal/hci_hal_android_hidl.cc	2026-10-31 07:15:00.336417942 +0000
++++ orph/android_packages_modules_Bluetooth/system/gd/hal/hci_hal_android_hidl.cc	2026-10-31 07:15:07.447734254 +0000
+@@ -432,7 +432,11 @@
+             LOG_ERROR("Unable to get a Bluetooth service after 500ms, start the HAL before starting Bluetooth");
+             return;
+           }
+-          LOG_ALWAYS_FATAL("Unable to get a Bluetooth service after 500ms, start the HAL before starting Bluetooth");
++          // Don't abort: IBluetoothHci::getService() below blocks until the HAL
++          // registers. On MTK the HAL takes ~1s to come up, which used to trip
++          // this 500ms watchdog and crash us into a boot loop. Just log it.
++          LOG_ERROR("Unable to get a Bluetooth service after 500ms, start the HAL before starting Bluetooth");
++          return;
+         }),
+         std::chrono::milliseconds(500));
+ 
+diff -ruN '--exclude=.git' up/android_packages_modules_Bluetooth/system/gd/hci/hci_layer.cc orph/android_packages_modules_Bluetooth/system/gd/hci/hci_layer.cc
+--- up/android_packages_modules_Bluetooth/system/gd/hci/hci_layer.cc	2026-10-31 07:15:00.336417942 +0000
++++ orph/android_packages_modules_Bluetooth/system/gd/hci/hci_layer.cc	2026-10-31 07:15:07.456734654 +0000
+@@ -52,6 +52,34 @@
+ using os::Handler;
+ using std::unique_ptr;
+ 
++// 2026-10-27 cannon: 控制器用 Command Status 回应了一个"本该 Command Complete"的命令时
++// （MTK 对 HCI_Sniff_Subrating 0x811 回 UNSUPPORTED_REMOTE_OR_LMP_FEATURE 就是这种情况），
++// 原代码会造一个**空的** CommandCompleteView 交给回调，指望回调自己发现无效。
++// 但 main/shim/hci_layer.cc 的 OnTransmitPacketCommandComplete() 第一句就是
++// OpCodeText(view.GetCommandOpCode())，而 GetCommandOpCode() 里有 ASSERT(was_validated_)，
++// 于是直接 abort -> com.android.bluetooth 反复 SIGABRT 重启 -> 耳机反复断连重连。
++// 这里改成造一个**合法**的 Command Complete（真实 opcode + 真实错误状态），
++// legacy 层就能正常走失败分支。
++static CommandCompleteView make_error_command_complete(OpCode op_code, ErrorCode status) {
++  auto bytes = std::make_shared<std::vector<uint8_t>>(std::initializer_list<uint8_t>{
++      static_cast<uint8_t>(EventCode::COMMAND_COMPLETE),
++      0x04,  // parameter_total_size: num_hci_command_packets(1) + opcode(2) + status(1)
++      0x01,  // num_hci_command_packets
++      static_cast<uint8_t>(static_cast<uint16_t>(op_code) & 0xff),
++      static_cast<uint8_t>(static_cast<uint16_t>(op_code) >> 8),
++      static_cast<uint8_t>(status),
++  });
++  CommandCompleteView view =
++      CommandCompleteView::Create(EventView::Create(PacketView<kLittleEndian>(bytes)));
++  // 关键：was_validated_ 只有 IsValid() 会置真，而所有取值器（GetCommandOpCode 等）
++  // 第一句都是 ASSERT(was_validated_)。只造出格式正确的包而不校验，照样会断言。
++  if (!view.IsValid()) {
++    LOG_ERROR("Failed to build a valid error Command Complete for opcode 0x%04x",
++              static_cast<uint16_t>(op_code));
++  }
++  return view;
++}
++
+ static void fail_if_reset_complete_not_success(CommandCompleteView complete) {
+   auto reset_complete = ResetCompleteView::Create(complete);
+   ASSERT(reset_complete.IsValid());
+@@ -213,16 +241,22 @@
+       // we can't treat this as hard failure since we have no way of probing this lack of support at
+       // earlier time. Instead we let the command complete handler handle a empty Command Complete
+       // packet, which will be interpreted as invalid response.
+-      CommandCompleteView command_complete_view = CommandCompleteView::Create(
+-          EventView::Create(PacketView<kLittleEndian>(std::make_shared<std::vector<uint8_t>>(std::vector<uint8_t>()))));
++      CommandCompleteView command_complete_view =
++          make_error_command_complete(op_code, ErrorCode::UNKNOWN_HCI_COMMAND);
+       command_queue_.front().GetCallback<CommandCompleteView>()->Invoke(
+           std::move(command_complete_view));
+     } else {
+       if (command_queue_.front().waiting_for_status_ == is_status) {
+         command_queue_.front().GetCallback<TResponse>()->Invoke(std::move(response_view));
+       } else {
+-        CommandCompleteView command_complete_view = CommandCompleteView::Create(
+-            EventView::Create(PacketView<kLittleEndian>(std::make_shared<std::vector<uint8_t>>(std::vector<uint8_t>()))));
++        // 类型对不上（例如该收 Command Complete 却收到 Command Status）。原代码传空视图，
++        // 会被 shim 的 GetCommandOpCode() 断言打挂，见 make_error_command_complete() 的注释。
++        ErrorCode error_status = ErrorCode::UNKNOWN_HCI_COMMAND;
++        if (is_status && status_view.IsValid()) {
++          error_status = status_view.GetStatus();
++        }
++        CommandCompleteView command_complete_view =
++            make_error_command_complete(op_code, error_status);
+         command_queue_.front().GetCallback<CommandCompleteView>()->Invoke(std::move(command_complete_view));
+       }
+     }

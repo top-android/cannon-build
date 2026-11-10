@@ -1,0 +1,128 @@
+diff --git a/core/java/android/os/storage/StorageManager.java b/core/java/android/os/storage/StorageManager.java
+index d45a17f71..58dd35c08 100644
+--- a/core/java/android/os/storage/StorageManager.java
++++ b/core/java/android/os/storage/StorageManager.java
+@@ -1709,6 +1709,27 @@ public class StorageManager {
+         return false;
+     }
+ 
++    /**
++     * Returns whether the system is currently in the "CryptKeeper bounce" window, i.e. booting
++     * and showing the unlock screen before the credential-encrypted storage is available.
++     *
++     * <p>This method existed up to Android 12 (backed by {@code IVold.inCryptKeeperBounce()}) and
++     * was removed in Android 13/14 together with the vold side. It is restored here because the
++     * prebuilt vendor IMS stack ({@code com.mediatek.ims} and {@code mediatek-wfo-legacy.jar},
++     * both built against Android 12) calls it statically and would otherwise die with
++     * {@code NoSuchMethodError}.
++     *
++     * <p>Android 14 no longer exposes this state from vold, and every device launching with
++     * Android 10+ is file-based encrypted, so the window this reported no longer exists in
++     * practice. Reporting {@code false} means "not bouncing, storage is ready", which is the
++     * correct answer for every call that can actually happen on this platform.
++     *
++     * @hide
++     */
++    public static boolean inCryptKeeperBounce() {
++        return false;
++    }
++
+     /** {@hide}
+      * Is this device encrypted?
+      * <p>
+diff --git a/core/res/res/values/config.xml b/core/res/res/values/config.xml
+index aed3b8279..aaa9b3ac5 100644
+--- a/core/res/res/values/config.xml
++++ b/core/res/res/values/config.xml
+@@ -2651,6 +2651,7 @@
+          Items must be in the form: "ntp://<host>[:port]"
+          This is not a registered IANA URI scheme. -->
+     <string-array translatable="false" name="config_ntpServers">
++        <item>ntp://ntp.aliyun.com</item>
+         <item>ntp://time.android.com</item>
+     </string-array>
+     <!-- SNTP client config: Timeout to wait for an NTP server response in milliseconds. -->
+@@ -2658,10 +2659,10 @@
+ 
+     <!-- Automatic "network" time detection config: Normal network time polling frequency in
+          milliseconds. -->
+-    <integer name="config_ntpPollingInterval">64800000</integer>
++    <integer name="config_ntpPollingInterval">12000000</integer>
+     <!-- Automatic "network" time detection config: Try-again network time polling interval in
+          milliseconds, in case the network request failed -->
+-    <integer name="config_ntpPollingIntervalShorter">60000</integer>
++    <integer name="config_ntpPollingIntervalShorter">6000</integer>
+     <!-- Automatic "network" time detection config: Number of times to try network time polling with
+          the shorter interval, before backing off until the normal polling interval. A value < 0
+          indicates infinite. -->
+diff --git a/packages/SystemUI/src/com/android/systemui/media/dialog/MediaOutputDialogFactory.kt b/packages/SystemUI/src/com/android/systemui/media/dialog/MediaOutputDialogFactory.kt
+index 02be0c1a6..0f30a08be 100644
+--- a/packages/SystemUI/src/com/android/systemui/media/dialog/MediaOutputDialogFactory.kt
++++ b/packages/SystemUI/src/com/android/systemui/media/dialog/MediaOutputDialogFactory.kt
+@@ -60,7 +60,7 @@ constructor(
+     }
+ 
+     /** Creates a [MediaOutputDialog] for the given package. */
+-    open fun create(packageName: String, aboveStatusBar: Boolean, view: View? = null) {
++    open fun create(packageName: String?, aboveStatusBar: Boolean, view: View? = null) {
+         createWithController(
+             packageName,
+             aboveStatusBar,
+@@ -79,7 +79,7 @@ constructor(
+ 
+     /** Creates a [MediaOutputDialog] for the given package. */
+     open fun createWithController(
+-        packageName: String,
++        packageName: String?,
+         aboveStatusBar: Boolean,
+         controller: DialogTransitionAnimator.Controller?,
+     ) {
+diff --git a/services/core/java/com/android/server/StorageManagerService.java b/services/core/java/com/android/server/StorageManagerService.java
+index d8fd56aa0..74b2029ac 100644
+--- a/services/core/java/com/android/server/StorageManagerService.java
++++ b/services/core/java/com/android/server/StorageManagerService.java
+@@ -976,6 +976,17 @@ class StorageManagerService extends IStorageManager.Stub
+     }
+ 
+     private boolean isHevcDecoderSupported() {
++        // cannon: A14 system libs + A12 vendor media stack => MediaCodecList.getCodecCount()
++        // blocks forever inside BpMediaPlayerService::getCodecList (verified with kill -3:
++        // the StorageManagerService handler thread is parked in
++        // IPCThreadState::waitForResponse).  Because this runs inside handleSystemReady(),
++        // the whole handler thread stalls => H_DAEMON_CONNECTED / H_BOOT_COMPLETED /
++        // H_VOLUME_MOUNT are never processed => no emulated volume => /storage/emulated is
++        // empty, so DocumentsUI spins on "Failed to find root .../root/primary".
++        // Transcoding is meaningless on this port, so skip the probe entirely.
++        if (SystemProperties.getBoolean("persist.sys.cannon.skip_hevc_probe", true)) {
++            return false;
++        }
+         MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+         MediaCodecInfo[] codecInfos = codecList.getCodecInfos();
+         for (MediaCodecInfo codecInfo : codecInfos) {
+diff --git a/telephony/java/android/telephony/SubscriptionManager.java b/telephony/java/android/telephony/SubscriptionManager.java
+index c5f2d4238..bb285bcd6 100644
+--- a/telephony/java/android/telephony/SubscriptionManager.java
++++ b/telephony/java/android/telephony/SubscriptionManager.java
+@@ -2495,6 +2495,22 @@ public class SubscriptionManager {
+         return sGetSlotIndexCache.query(subscriptionId);
+     }
+ 
++    /**
++     * Returns a constant indicating the state of the SIM on the given logical slot index.
++     *
++     * <p>This method existed up to Android 12 and was removed in Android 13/14. It is restored
++     * here because the prebuilt vendor IMS stack ({@code com.mediatek.ims}, built against
++     * Android 12) invokes it statically and otherwise dies at process start with
++     * {@code NoSuchMethodError}, taking VoLTE and therefore all calls down with it.
++     *
++     * @param slotIndex Logical SIM slot index.
++     * @return one of the {@code TelephonyManager.SIM_STATE_*} constants.
++     * @hide
++     */
++    public static int getSimStateForSlotIndex(int slotIndex) {
++        return TelephonyManager.getSimStateForSlotIndex(slotIndex);
++    }
++
+     /**
+      * Get an array of subscription ids for the specified logical SIM slot Index. The maximum size
+      * of the array is 1. This API was mistakenly designed to return multiple subscription ids,

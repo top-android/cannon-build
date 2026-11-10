@@ -1,0 +1,31 @@
+diff --git a/libbase/strings.cpp b/libbase/strings.cpp
+index 5b7f4f8..010cf70 100644
+--- a/libbase/strings.cpp
++++ b/libbase/strings.cpp
+@@ -4,7 +4,8 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-#include <android-base/strings.h>
++#include <cstring>
++#include <string>
+ 
+ namespace android {
+ namespace base {
+@@ -12,8 +13,15 @@ bool StartsWith(const std::string& s, const char* prefix) {
+     return strncmp(s.c_str(), prefix, strlen(prefix)) == 0;
+ }
+ 
++// 自包含实现：不调用 A15 libbase 的模板 Trim(std::string_view)，避免垫片自身在
++// 运行时又依赖某一版本 libbase 的模板实例化符号（否则加载到不含该模板的 libbase
++// 时垫片自身会失败，达不到"给 libnvram 补旧 Trim"的目的）。语义与 android::base::Trim 一致。
+ std::string Trim(const std::string& s) {
+-    return Trim(std::string_view(s));
++    static const char* kWhitespace = " \t\n\v\f\r";
++    const auto first = s.find_first_not_of(kWhitespace);
++    if (first == std::string::npos) return std::string();
++    const auto last = s.find_last_not_of(kWhitespace);
++    return s.substr(first, last - first + 1);
+ }
+ }  // namespace base
+ }  // namespace android

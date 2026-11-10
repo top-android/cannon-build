@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  cannon A15 local_manifests 草稿（对应 DECISIONS.md D7 方案 A：选择性分支 + build-time apply）
+  目标系统：LineageOS 22.x / Android 15（分支 lineage-22.2，2026-10-29 用户确认）
+
+  用法：放到源码树 .repo/local_manifests/cannon.xml（替换 A14 的 cannon.xml）
+  注意：标 [需先建分支] 的 4 个仓库，若线上还没有 lineage-22.2-cannon 分支，repo sync 会失败。
+       请先按 NEXT_TASK 创建分支，或临时把 revision 指到已有分支。
+  补丁：以下所有 “走上游” 的项目不带自己的提交，A14 补丁由
+       `bash scripts/apply_cannon_patches.sh /cannon/rom` 在编译前 build-time 应用。
+-->
+<manifest>
+    <!-- 全部走 GitHub 源站（与 A14 一致） -->
+    <remote name="devs" fetch="https://github.com" />
+    <!-- 私有仓走 SSH（仅 keys 仓用；该仓无可匿名访问的 https 入口） -->
+    <remote name="top-ssh" fetch="ssh://git@github.com/top-android" />
+
+    <!-- ===================== 1) 我们自带分支：A15 = lineage-22.2-cannon ===================== -->
+    <!-- [需先建分支] 设备树（428 commits 真历史，lineage-21-cannon -> 移植到 22.2） -->
+    <project path="device/xiaomi/cannon"
+             name="top-android/android_device_xiaomi_cannon"
+             remote="devs" revision="lineage-22.2-cannon" />
+
+    <!-- [需先建分支] vendor blobs（17 commits） -->
+    <project path="vendor/xiaomi/cannon"
+             name="top-android/android_vendor_xiaomi_cannon"
+             remote="devs" revision="lineage-22.2-cannon" />
+
+    <!-- [需先建分支] 内核 4.14.336（12 commits） -->
+    <project path="kernel/xiaomi/cannon"
+             name="top-android/android_kernel_xiaomi_cannon"
+             remote="devs" revision="lineage-22.2-cannon" />
+
+    <!-- [需先建分支] 设备专有 WiFi HAL：上游 LineageOS 无此仓库，xiaomi-mt6853-devs 仅 lineage-21
+         无 A15 可依 -> 必须自带 lineage-22.2-cannon -->
+    <project path="hardware/mediatek/wlan"
+             name="top-android/android_hardware_mediatek_wlan"
+             remote="devs" revision="lineage-22.2-cannon" />
+
+    <!-- ===================== 2) 走上游 lineage-22.2，补丁 build-time apply ===================== -->
+    <!-- 以下三项 A14 也用 LineageOS 上游；A15 直接跟 lineage-22.2。
+         （若 A15 主 manifest 已包含同路径，此处的 pin 属冗余但无害；可按需删） -->
+    <project path="hardware/mediatek"
+             name="LineageOS/android_hardware_mediatek"
+             remote="devs" revision="lineage-22.2" />
+
+    <project path="hardware/xiaomi"
+             name="LineageOS/android_hardware_xiaomi"
+             remote="devs" revision="lineage-22.2" />
+
+    <project path="device/mediatek/sepolicy_vndr"
+             name="LineageOS/android_device_mediatek_sepolicy_vndr"
+             remote="devs" revision="lineage-22.2" />
+
+    <!-- Jelly：A14 有 2 条真补丁(onCreateWindow / scheme 白名单)。
+         方案：走上游，把这 2 条并入 apply 补丁集。若 A15 主 manifest 已含 Jelly，则无需此处声明。 -->
+    <!-- <project path="packages/apps/Jelly"
+             name="LineageOS/android_packages_apps_Jelly"
+             remote="devs" revision="lineage-22.2" /> -->
+
+    <!-- ===================== 3) 不在本清单里的 AOSP 侧补丁项目 =====================
+         build/make, frameworks/base, frameworks/native, frameworks/opt/telephony,
+         system/core, system/bpf, system/vold, system/apex, system/libhidl,
+         system/memory/libmeminfo, system/server_configurable_flags,
+         external/boringssl, packages/modules/Connectivity, packages/modules/UprobeStats
+         —— 这些来自 A15 主 manifest，不在此 override；由 apply_cannon_patches.sh 打补丁。
+         packages/modules/Wifi —— 跟 A15 官方 manifest revision，不 override。
+    -->
+
+    <!-- ===================== 4) 私有签名/AVB key（关键，勿删） =====================
+         2026-10-29 修正：A15 自建清单最初漏了这条 → build#5 fsgen 报
+         "vendor/lineage-priv/keys/avb_release.pem does not exist"，且 APK/OTA 静默回落
+         AOSP test-keys。此 project 提供 keys.mk（PRODUCT_DEFAULT_DEV_CERTIFICATE=releasekey）、
+         avb_release.pem 与全套 APEX/APK 证书。必须在 vendor/lineage-priv/keys（keys.mk 硬编码路径）。
+         ★私钥仓，仅存在于 /cannon/rom，绝不并入 /cannon 配置仓★
+         （来源：top-android/cannon-build/blob/main/local_manifests/cannon.xml 的同名条目） -->
+    <project path="vendor/lineage-priv/keys"
+             name="android_vendor_lineage-priv_keys"
+             remote="top-ssh" revision="main" />
+</manifest>

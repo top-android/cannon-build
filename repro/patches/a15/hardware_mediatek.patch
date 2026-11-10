@@ -1,0 +1,61 @@
+diff --git a/aidl/power-mediatek/Android.bp b/aidl/power-mediatek/Android.bp
+index ccee382..48e56fd 100644
+--- a/aidl/power-mediatek/Android.bp
++++ b/aidl/power-mediatek/Android.bp
+@@ -30,13 +30,18 @@ mediatek_power_defaults {
+     },
+ }
+ 
+-cc_library_shared {
++cc_binary {
+     name: "android.hardware.power-service-mediatek",
+     defaults: ["mediatek_power_defaults"],
+     vendor: true,
++    relative_install_path: "hw",
+     compile_multilib: "64",
++    init_rc: ["android.hardware.power-service-mediatek.rc"],
+     vintf_fragments: ["power-mtk.xml"],
+-    srcs: ["Power.cpp"],
++    srcs: [
++        "Power.cpp",
++        "service.cpp",
++    ],
+ 
+     shared_libs: [
+         "libbase",
+
+# ===== 新增文件: aidl/power-mediatek/android.hardware.power-service-mediatek.rc =====
++service vendor.power-mediatek /vendor/bin/hw/android.hardware.power-service-mediatek
++    interface aidl android.hardware.power.IPower/default
++    class hal
++    user system
++    group system
+
+# ===== 新增文件: aidl/power-mediatek/service.cpp =====
++/*
++ * SPDX-FileCopyrightText: 2024 The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <android-base/logging.h>
++#include <android/binder_manager.h>
++#include <android/binder_process.h>
++
++#include "Power.h"
++
++using aidl::android::hardware::power::impl::mediatek::Power;
++
++int main() {
++    ABinderProcess_setThreadPoolMaxThreadCount(0);
++    std::shared_ptr<Power> power = ndk::SharedRefBase::make<Power>();
++
++    const std::string instance = std::string() + Power::descriptor + "/default";
++    binder_status_t status = AServiceManager_addService(power->asBinder().get(), instance.c_str());
++    CHECK(status == STATUS_OK);
++
++    ABinderProcess_joinThreadPool();
++    return EXIT_FAILURE;  // should not reach
++}
+
+# ===== 新增文件: wlan/ =====
+# （二进制文件，内容略，由脚本再生）

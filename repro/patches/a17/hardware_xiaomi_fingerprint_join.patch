@@ -1,0 +1,67 @@
+diff --git a/aidl/fingerprint/Android.bp b/aidl/fingerprint/Android.bp
+index 96ca610..cc145ce 100644
+--- a/aidl/fingerprint/Android.bp
++++ b/aidl/fingerprint/Android.bp
+@@ -18,6 +18,10 @@ cc_binary {
+         "LockoutTracker.cpp",
+         "Session.cpp",
+         "service.cpp",
++        // [cannon][A17][2026-11-08] V13 原厂 libbase blob 不含本服务 UND 的
++        // Join(vector<string>&, const char*) 实例（A17 libbase 才有）。
++        // 直接在本模块内提供该符号，避免跨 namespace 依赖。
++        "FingerprintJoin.cpp",
+     ],
+     local_include_dirs: [
+         "include",
+diff --git a/aidl/fingerprint/FingerprintJoin.cpp b/aidl/fingerprint/FingerprintJoin.cpp
+new file mode 100644
+index 0000000..866fdb2
+--- /dev/null
++++ b/aidl/fingerprint/FingerprintJoin.cpp
+@@ -0,0 +1,46 @@
++// [cannon][A17][2026-11-08] AIDL 指纹服务的 libbase 兼容垫片
++//
++// hardware/xiaomi/aidl/fingerprint（A17 源码编译）通过 <android-base/strings.h> 的
++// `extern template std::string Join(std::vector<std::string>&, const char*)`
++// 产生一个 UND 引用；该实例只存在于 A17 编译的 libbase.so 里，V13 原厂 libbase blob
++// 没有它。若把 V13 blob 放回 /vendor/lib{64}/libbase.so（IMS 链上 libnvram/libsysenv
++// 等依赖 V13 独有的 Trim 等符号，必须用 V13），指纹服务就会 CANNOT LINK。
++//
++// 解法：不改动任何 blob，也不改动服务二进制，只用设备树既有的 TARGET_LD_SHIM_LIBS
++// 机制，让 linker 在加载该服务时预加载本库，由本库提供这一个缺失符号。
++// 实现照抄 AOSP strings.h 的 fast path（string-like 元素 + const char* 分隔符）。
++//
++// 注意：符号必须 GLOBAL DEFAULT，不能用匿名 namespace（会变 LOCAL，linker 无法解析）；
++// 也不能链接 libbase（会与 V13 blob 形成循环依赖）。
++
++#include <string>
++#include <string_view>
++#include <vector>
++#include <numeric>
++#include <iterator>
++
++__attribute__((visibility("default")))
++std::string cannon_join_impl(std::vector<std::string>& things, const char* separator)
++    __asm__("_ZN7android4base4JoinIRNSt3__16vectorINS2_12basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEENS7_IS9_EEEEPKcEES9_OT_T0_");
++
++__attribute__((visibility("default")))
++std::string cannon_join_impl(std::vector<std::string>& things, const char* separator) {
++    if (things.empty()) return {};
++    if (things.size() == 1) return *things.begin();
++
++    const std::string_view sep(separator);
++    const std::string_view::size_type total = std::accumulate(
++            std::next(things.begin()), things.end(),
++            std::string_view(*things.begin()).size(),
++            [&sep](std::string_view::size_type sum, std::string_view sv) {
++                return sum + sep.size() + sv.size();
++            });
++
++    std::string result;
++    result.reserve(total);
++    result.append(*things.begin());
++    for (auto it = std::next(things.begin()); it != things.end(); ++it) {
++        result.append(separator).append(*it);
++    }
++    return result;
++}

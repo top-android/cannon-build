@@ -1,0 +1,19 @@
+diff --git a/build/soong/Android.bp b/build/soong/Android.bp
+index 237f7aa..23ab3f6 100644
+--- a/build/soong/Android.bp
++++ b/build/soong/Android.bp
+@@ -46,8 +46,14 @@ lineage_generator {
+ 
+     // Sources for dependency tracking
+     dep_root: "$(TARGET_KERNEL_SOURCE)",
++    // [cannon][A17] 老式非 GKI 内核(4.14)走 make headers_install 分支，顶层 Makefile 会
++    // include scripts/Kbuild.include、scripts/Makefile.{kcov,gcc-plugins,kasan,extrawarn,ubsan}
++    // 及 arch/$(KERNEL_ARCH)/Makefile。这些必须在 sbox 沙箱内可见，否则 make 解析期即报
++    // "No such file or directory / No rule to make target"。故补 scripts/**/* 与 arch Makefile。
+     dep_files: [
+         "Makefile",
++        "scripts/**/*",
++        "arch/$(KERNEL_ARCH)/Makefile",
+         "include/**/*",
+         "arch/$(KERNEL_ARCH)/include/**/*",
+         "techpack/audio/include/**/*",

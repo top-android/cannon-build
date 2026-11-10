@@ -1,0 +1,13 @@
+diff --git a/wpa_supplicant_8_lib/mediatek_driver_cmd_nl80211.c b/wpa_supplicant_8_lib/mediatek_driver_cmd_nl80211.c
+index 0dc5534..c8b73a8 100644
+--- a/wpa_supplicant_8_lib/mediatek_driver_cmd_nl80211.c
++++ b/wpa_supplicant_8_lib/mediatek_driver_cmd_nl80211.c
+@@ -362,7 +362,7 @@ static int wpa_driver_nl80211_testmode(void *priv, const u8 *data, size_t data_l
+     params = (struct wpa_driver_testmode_params *)data;
+ 
+     /* Mask version field */
+-    index = params->hdr.index & BITS(0, 23);
++    index = params->hdr.index & 0xFFFFFF /* BITS(0,23)：低24位掩码。新版 wpa_supplicant common.h 把 BITS 定义为3参，冲突，故展开 */;
+ 
+     switch(index) {
+         case NL80211_TESTMODE_STATISTICS:

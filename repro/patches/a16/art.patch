@@ -1,0 +1,20 @@
+diff --git a/tools/hiddenapi/hiddenapi.cc b/tools/hiddenapi/hiddenapi.cc
+index 478c90e..1e2ee0c 100644
+--- a/tools/hiddenapi/hiddenapi.cc
++++ b/tools/hiddenapi/hiddenapi.cc
+@@ -150,10 +150,11 @@ class DexClass : public ClassAccessor {
+   inline bool Equals(const DexClass& other) const {
+     bool equals = GetDescriptorView() == other.GetDescriptorView();
+ 
+-    if (equals) {
+-      LOG(FATAL) << "Class duplication: " << GetDescriptorView() << " in "
+-          << dex_file_.GetLocation() << " and " << other.dex_file_.GetLocation();
+-    }
++    // A16-D8: MTK 原厂 boot classpath 合法地在多个 jar 里带同一个类（此处
++    // netdagent V1_0，两个 jar 一旧一新 HIDL base），stock/A15 一直如此且能跑。
++    // A16 把"重复类"升级为 LOG(FATAL)；这里恢复 pre-A16 的宽容语义（只比
++    // descriptor），使本设备可继续构建，与 A15 / stock bootclasspath 行为一致。
++    // 可逆；见 docs/A16_FIX_PLAYBOOK.md 「A16-D8」。
+ 
+     return equals;
+   }

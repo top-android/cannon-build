@@ -1,0 +1,13 @@
+diff --git a/server/netd.rc b/server/netd.rc
+index 38f7cd4..f04eb87 100644
+--- a/server/netd.rc
++++ b/server/netd.rc
+@@ -10,7 +10,7 @@ service netd1shot /system/bin/netd oneshot
+     updatable
+     # these two only apply to 'netd1shot'
+     oneshot
+-    reboot_on_failure reboot,netd1shot-fail
++    # reboot_on_failure reboot,netd1shot-fail  # cannon: 4.14 调 BPF 期间先不重启
+ 
+ # Keep in sync with 'netd1shot' above.
+ service netd /system/bin/netd

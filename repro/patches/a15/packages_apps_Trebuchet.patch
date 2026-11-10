@@ -1,0 +1,93 @@
+diff --git a/quickstep/res/layout/overview_actions_container.xml b/quickstep/res/layout/overview_actions_container.xml
+index fcd2e54..770df50 100644
+--- a/quickstep/res/layout/overview_actions_container.xml
++++ b/quickstep/res/layout/overview_actions_container.xml
+@@ -45,6 +45,19 @@
+             android:theme="@style/ThemeControlHighlightWorkspaceColor"
+             android:visibility="gone" />
+ 
++        <!-- cannon: 常驻“清除全部”，无需滚动到任务列表末尾 -->
++        <Space
++            android:layout_width="@dimen/overview_actions_button_spacing"
++            android:layout_height="1dp" />
++
++        <Button
++            android:id="@+id/action_clear_all"
++            style="@style/OverviewActionButton"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:text="@string/recents_clear_all"
++            android:theme="@style/ThemeControlHighlightWorkspaceColor" />
++
+     </LinearLayout>
+ 
+     <!-- Currently, the only "group action button" is this save app pair button. If more are added,
+diff --git a/quickstep/src/com/android/quickstep/views/OverviewActionsView.java b/quickstep/src/com/android/quickstep/views/OverviewActionsView.java
+index 764bf0b..07d6385 100644
+--- a/quickstep/src/com/android/quickstep/views/OverviewActionsView.java
++++ b/quickstep/src/com/android/quickstep/views/OverviewActionsView.java
+@@ -182,6 +182,12 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
+         mSplitButton = findViewById(R.id.action_split);
+         mSplitButton.setOnClickListener(this);
+         mSaveAppPairButton.setOnClickListener(this);
++
++        // cannon: 常驻“清除全部”按钮（Go 版布局可能无此 id，判空）
++        View clearAll = findViewById(R.id.action_clear_all);
++        if (clearAll != null) {
++            clearAll.setOnClickListener(this);
++        }
+     }
+ 
+     /**
+@@ -195,10 +201,15 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
+ 
+     @Override
+     public void onClick(View view) {
++        int id = view.getId();
++        // cannon: 清除全部不依赖 mCallbacks，空态下也能用
++        if (id == R.id.action_clear_all) {
++            dismissAllTasks();
++            return;
++        }
+         if (mCallbacks == null) {
+             return;
+         }
+-        int id = view.getId();
+         if (id == R.id.action_screenshot) {
+             mCallbacks.onScreenshot();
+         } else if (id == R.id.action_split) {
+@@ -208,6 +219,21 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
+         }
+     }
+ 
++    /**
++     * cannon: 常驻“清除全部”的点击处理。不挂 mCallbacks（其仅在选中任务时设置），
++     * 直接从根视图找同级 RecentsView 调它自己的 dismissAllTasks。
++     */
++    private void dismissAllTasks() {
++        View root = getRootView();
++        if (root == null) {
++            return;
++        }
++        View recents = root.findViewById(R.id.overview_panel);
++        if (recents instanceof RecentsView) {
++            ((RecentsView) recents).dismissAllTasks(this);
++        }
++    }
++
+     @Override
+     protected void onConfigurationChanged(Configuration newConfig) {
+         super.onConfigurationChanged(newConfig);
+diff --git a/quickstep/src/com/android/quickstep/views/RecentsView.java b/quickstep/src/com/android/quickstep/views/RecentsView.java
+index 6752775..4760654 100644
+--- a/quickstep/src/com/android/quickstep/views/RecentsView.java
++++ b/quickstep/src/com/android/quickstep/views/RecentsView.java
+@@ -4527,7 +4527,7 @@ public abstract class RecentsView<
+     }
+ 
+     @SuppressWarnings("unused")
+-    private void dismissAllTasks(View view) {
++    public void dismissAllTasks(View view) {
+         runDismissAnimation(createAllTasksDismissAnimation(DISMISS_TASK_DURATION));
+         mContainer.getStatsLogManager().logger().log(LAUNCHER_TASK_CLEAR_ALL);
+     }

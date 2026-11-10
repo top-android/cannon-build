@@ -1,0 +1,46 @@
+diff --git a/core/Makefile b/core/Makefile
+index 849dac7..53d6b76 100644
+--- a/core/Makefile
++++ b/core/Makefile
+@@ -2732,6 +2732,8 @@ $(INTERNAL_RECOVERY_RAMDISK_FILES_TIMESTAMP): $(MKBOOTFS) \
+ 	# Copying baseline ramdisk...
+ 	# Use rsync because "cp -Rf" fails to overwrite broken symlinks on Mac.
+ 	rsync -a --exclude=sdcard $(IGNORE_RECOVERY_SEPOLICY) $(IGNORE_CACHE_LINK) $(TARGET_ROOT_OUT) $(TARGET_RECOVERY_OUT)
++	# Remove d symlink (points to host /sys/kernel/debug, breaks zip)
++	rm -f $(TARGET_RECOVERY_ROOT_OUT)/d
+ 	# Modifying ramdisk contents...
+ 	ln -sf /system/bin/init $(TARGET_RECOVERY_ROOT_OUT)/init
+ 	# Removes $(TARGET_RECOVERY_ROOT_OUT)/init*.rc EXCEPT init.recovery*.rc.
+@@ -6436,6 +6438,8 @@ ifneq (,$(INSTALLED_RECOVERYIMAGE_TARGET)$(filter true,$(BOARD_USES_RECOVERY_AS_
+ ifneq (true,$(BOARD_INCLUDE_RECOVERY_RAMDISK_IN_VENDOR_BOOT))
+ 	$(hide) $(call package_files-copy-root, \
+ 	    $(TARGET_RECOVERY_ROOT_OUT),$(zip_root)/$(PRIVATE_RECOVERY_OUT)/RAMDISK)
++	# Remove d symlink (points to host /sys/kernel/debug, breaks zip)
++	$(hide) rm -f $(zip_root)/$(PRIVATE_RECOVERY_OUT)/RAMDISK/d
+ endif
+ 	@# OTA install helpers
+ 	$(hide) $(call package_files-copy-root, \
+@@ -6482,6 +6486,8 @@ endif # INSTALLED_RECOVERYIMAGE_TARGET defined or BOARD_USES_RECOVERY_AS_BOOT is
+ 	$(hide) mkdir -p $(zip_root)/ROOT
+ 	$(hide) $(call package_files-copy-root, \
+ 	    $(TARGET_ROOT_OUT),$(zip_root)/ROOT)
++	# Remove d symlink (points to host /sys/kernel/debug, breaks zip)
++	$(hide) rm -f $(zip_root)/ROOT/d
+ 	@# If we are using recovery as boot, this is already done when processing recovery.
+ ifneq ($(BOARD_USES_RECOVERY_AS_BOOT),true)
+ 	$(hide) $(call package_files-copy-root, \
+diff --git a/core/sysprop.mk b/core/sysprop.mk
+index 0fcc92c..b8e9138 100644
+--- a/core/sysprop.mk
++++ b/core/sysprop.mk
+@@ -239,6 +239,10 @@ else
+   BUILD_DISPLAY_ID := $(BUILD_DESC)
+ endif
+ 
++# cannon: 不管是 eng / userdebug / user，设置里只显示 "产品名-构建变体"，
++# 不暴露 "14 AP2A.xxx eng.root.<时间> test-keys" 或 "AP2A.xxx dev-keys"
++BUILD_DISPLAY_ID := $(TARGET_PRODUCT)-$(TARGET_BUILD_VARIANT)
++
+ # TARGET_BUILD_FLAVOR and ro.build.flavor are used only by the test
+ # harness to distinguish builds. Only add _asan for a sanitized build
+ # if it isn't already a part of the flavor (via a dedicated lunch

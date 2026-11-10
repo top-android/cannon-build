@@ -1,0 +1,551 @@
+diff --git a/frameworks/common/Android.bp b/frameworks/common/Android.bp
+index 698e7ed..58e008e 100644
+--- a/frameworks/common/Android.bp
++++ b/frameworks/common/Android.bp
+@@ -4,13 +4,13 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ 
+-java_library {
+-    name: "mediatek-common",
+-    installable: true,
+-    system_ext_specific: true,
+-    use_generic_config: true,
+-
+-    srcs: [
+-        "src/**/*.java",
+-    ],
+-}
++// cannon A16-D4：上游新增的源码版 mediatek-common（此处 java_library，仅一个类
++// OperatorCustomizationFactoryLoader）与本设备 vendor 的专有 prebuilt
++// （vendor/xiaomi/cannon/Android.bp 中 dex_import "mediatek-common"，
++//  jars: proprietary/system/framework/mediatek-common.jar）同名，导致 Kati 报
++//   MODULE.TARGET.JAVA_LIBRARIES.mediatek-common already defined by ...
++// 设备实际需要的是与专有 mediatek-framework.jar 配对的 vendor jar（A15 即用此），
++// 故停用上游源码版（不参与命名/安装），保留 vendor prebuilt 作为唯一 mediatek-common。
++// 说明：本文件上游原本仅定义该 java_library；本机无任何模块以编译依赖方式引用它，
++// 且 hardware/mediatek/frameworks/mediatek-frameworks.mk 未被本产品引入，
++// 故停用不影响编译图。需要恢复上游行为时 git checkout 本文件即可。
+diff --git a/frameworks/telecom-common/Android.bp b/frameworks/telecom-common/Android.bp
+index 9251b6c..6058240 100644
+--- a/frameworks/telecom-common/Android.bp
++++ b/frameworks/telecom-common/Android.bp
+@@ -4,13 +4,13 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ 
+-java_library {
+-    name: "mediatek-telecom-common",
+-    installable: true,
+-    system_ext_specific: true,
+-    use_generic_config: true,
+-
+-    srcs: [
+-        "src/**/*.java",
+-    ],
+-}
++// cannon A16-D6：上游新增的源码版 mediatek-telecom-common（此处 java_library，仅
++// MtkVideoProfile 一个类）与本设备 vendor 的专有 prebuilt
++// （vendor/xiaomi/cannon/Android.bp 中 dex_import "mediatek-telecom-common"，
++//  jars: proprietary/system/framework/mediatek-telecom-common.jar）同名，导致 Kati 报
++//   MODULE.TARGET.JAVA_LIBRARIES.mediatek-telecom-common already defined by ...
++// 与 A16-D5（mediatek-common）完全同模式。设备实际需要的是与专有 mediatek-framework.jar
++// 配对的 vendor jar（A15 即用此），故停用上游源码版（不参与命名/安装），
++// 保留 vendor prebuilt 作为唯一 mediatek-telecom-common。
++// 说明：hardware/mediatek/frameworks/mediatek-frameworks.mk 未被本产品引入，
++// 无模块以编译依赖方式引用它，故停用不影响编译图。恢复用 git checkout 本文件。
+diff --git a/frameworks/telephony-common/Android.bp b/frameworks/telephony-common/Android.bp
+index dfc125e..89d42d2 100644
+--- a/frameworks/telephony-common/Android.bp
++++ b/frameworks/telephony-common/Android.bp
+@@ -4,17 +4,13 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ 
+-java_library {
+-    name: "mediatek-telephony-common",
+-    installable: true,
+-    system_ext_specific: true,
+-    use_generic_config: true,
+-
+-    srcs: [
+-        "src/**/*.java",
+-    ],
+-
+-    libs: [
+-        "telephony-common",
+-    ],
+-}
++// cannon A16-D6：上游新增的源码版 mediatek-telephony-common（此处 java_library，
++// libs:"telephony-common"）与本设备 vendor 的专有 prebuilt
++// （vendor/xiaomi/cannon/Android.bp 中 dex_import "mediatek-telephony-common"，
++//  jars: proprietary/system/framework/mediatek-telephony-common.jar）同名，导致 Kati 报
++//   MODULE.TARGET.JAVA_LIBRARIES.mediatek-telephony-common already defined by ...
++// 与 A16-D5（mediatek-common）/D6（telecom-common）完全同模式。设备实际需要的是与
++// 专有 mediatek-framework.jar 配对的 vendor jar（A15 即用此），故停用上游源码版，
++// 保留 vendor prebuilt 作为唯一 mediatek-telephony-common。
++// 说明：hardware/mediatek/frameworks/mediatek-frameworks.mk 未被本产品引入，
++// 无模块以编译依赖方式引用它，故停用不影响编译图。恢复用 git checkout 本文件。
+diff --git a/packages/PowerOffAlarm/Android.bp b/packages/PowerOffAlarm/Android.bp
+index ffb9fb2..a2cca18 100644
+--- a/packages/PowerOffAlarm/Android.bp
++++ b/packages/PowerOffAlarm/Android.bp
+@@ -35,10 +35,12 @@ cc_library {
+         "-Wall",
+         "-Wextra",
+     ],
++    // A16-D11: 移除 generated_kernel_headers。它把整棵内核 uapi(含 linux/sched/types.h)
++    // 排在 bionic 之前，导致 struct sched_param 与 bionic sched.h 重定义(A16 clang 判 error)。
++    // bionic 自带 linux/ioctl.h 与 linux/rtc.h，本模块无需内核生成头；可逆。
+     header_libs: [
+         "jni_headers",
+         "libbase_headers",
+-        "generated_kernel_headers",
+     ],
+     shared_libs: [
+         "liblog",
+diff --git a/aidl/power-mediatek/Android.bp b/aidl/power-mediatek/Android.bp
+new file mode 100644
+index 0000000..48e56fd
+--- /dev/null
++++ b/aidl/power-mediatek/Android.bp
+@@ -0,0 +1,51 @@
++//
++// SPDX-FileCopyrightText: 2024 The LineageOS Project
++// SPDX-License-Identifier: Apache-2.0
++//
++
++soong_config_module_type {
++    name: "mediatek_power_defaults",
++    module_type: "cc_defaults",
++    config_namespace: "mediatek_power",
++    value_variables: [
++        "double_tap_to_wake_node",
++        "powerhal_ext",
++    ],
++    properties: [
++        "cflags",
++        "whole_static_libs",
++    ],
++}
++
++mediatek_power_defaults {
++    name: "mediatek_power_defaults",
++    soong_config_variables: {
++        double_tap_to_wake_node: {
++            cflags: ["-DTAP_TO_WAKE_NODE=\"%s\""],
++        },
++        powerhal_ext: {
++            cflags: ["-DMODE_EXT"],
++            whole_static_libs: ["%s"],
++        },
++    },
++}
++
++cc_binary {
++    name: "android.hardware.power-service-mediatek",
++    defaults: ["mediatek_power_defaults"],
++    vendor: true,
++    relative_install_path: "hw",
++    compile_multilib: "64",
++    init_rc: ["android.hardware.power-service-mediatek.rc"],
++    vintf_fragments: ["power-mtk.xml"],
++    srcs: [
++        "Power.cpp",
++        "service.cpp",
++    ],
++
++    shared_libs: [
++        "libbase",
++        "libbinder_ndk",
++        "android.hardware.power-V2-ndk",
++    ],
++}
+diff --git a/aidl/power-mediatek/Power.cpp b/aidl/power-mediatek/Power.cpp
+new file mode 100644
+index 0000000..2d23173
+--- /dev/null
++++ b/aidl/power-mediatek/Power.cpp
+@@ -0,0 +1,231 @@
++/*
++ * SPDX-FileCopyrightText: 2020 The Android Open Source Project
++ * SPDX-FileCopyrightText: 2023 The LineageOS Project
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <dlfcn.h>
++#include <time.h>
++
++#include "Power.h"
++
++#include <android-base/logging.h>
++#include <android-base/properties.h>
++
++#ifdef TAP_TO_WAKE_NODE
++#include <android-base/file.h>
++#endif
++
++using android::base::GetIntProperty;
++
++#define DLSYM_GET_FUNCTION(func_ptr, handle, func_name)          \
++    func_ptr = (typeof(func_ptr))dlsym(handle, #func_name);      \
++    if (func_ptr == NULL) {                                      \
++        LOG(ERROR) << "Could not locate symbol " #func_name "."; \
++        abort();                                                 \
++    }
++
++namespace aidl {
++namespace android {
++namespace hardware {
++namespace power {
++namespace impl {
++namespace mediatek {
++
++#ifdef MODE_EXT
++extern bool isDeviceSpecificModeSupported(Mode type, bool* _aidl_return);
++extern bool setDeviceSpecificMode(Mode type, bool enabled);
++#endif
++
++Power::Power() {
++    mTouchBoostDuration = GetIntProperty(kTouchBoostDurationProperty, kDefaultTouchBoostDuration);
++    if (mTouchBoostDuration < 0 || mTouchBoostDuration > kMaxTouchBoostDuration) {
++        LOG(ERROR) << "Invalid touch boost duration: " << mTouchBoostDuration;
++        mTouchBoostDuration = kDefaultTouchBoostDuration;
++    }
++
++    mPerf = (struct libpowerhal_t*)calloc(1, sizeof(struct libpowerhal_t));
++    if (!mPerf) {
++        LOG(ERROR) << "Could not allocate memory for libpowerhal struct.";
++        abort();
++    }
++
++    mPerf->perfLib = dlopen(POWERHAL_LIB_NAME, RTLD_LAZY);
++    if (!mPerf->perfLib) {
++        LOG(ERROR) << "Could not dlopen " << POWERHAL_LIB_NAME;
++        abort();
++    }
++
++    DLSYM_GET_FUNCTION(mPerf->Init, mPerf->perfLib, libpowerhal_Init);
++    DLSYM_GET_FUNCTION(mPerf->CusLockHint, mPerf->perfLib, libpowerhal_CusLockHint);
++    DLSYM_GET_FUNCTION(mPerf->LockRel, mPerf->perfLib, libpowerhal_LockRel);
++    DLSYM_GET_FUNCTION(mPerf->UserScnDisableAll, mPerf->perfLib, libpowerhal_UserScnDisableAll);
++    DLSYM_GET_FUNCTION(mPerf->UserScnRestoreAll, mPerf->perfLib, libpowerhal_UserScnRestoreAll);
++
++    mPerf->Init(1);
++}
++
++Power::~Power() {}
++
++long long Power::calcTimespanUs(struct timespec start, struct timespec end) {
++    long long diff_in_us = 0;
++    diff_in_us += (end.tv_sec - start.tv_sec) * USINSEC;
++    diff_in_us += (end.tv_nsec - start.tv_nsec) / NSINUS;
++    return diff_in_us;
++}
++
++void Power::handleInteractionHint(int32_t targetDuration) {
++    struct timespec currentInteractionTime;
++    long long elapsedTime;
++    int32_t durationMs = kMinInteractiveDuration;
++
++    // if targetDuration is 0, we perform a touch boost instead.
++    if (targetDuration == 0) {
++        if (mTouchBoostDuration == 0) {
++            return;
++        }
++        mPerf->CusLockHint(MTKPOWER_HINT_APP_TOUCH, mTouchBoostDuration, getpid());
++        return;
++    }
++
++    if (targetDuration > durationMs) {
++        durationMs = (targetDuration > kMaxInteractiveDuration) ? kMaxInteractiveDuration
++                                                                : targetDuration;
++    }
++
++    clock_gettime(CLOCK_MONOTONIC, &currentInteractionTime);
++    elapsedTime = calcTimespanUs(mPreviousInteractionTime, currentInteractionTime);
++
++    // don't hint if it's been less than 250ms since last boost
++    // also detect if we're doing anything resembling a fling
++    // support additional boosting in case of flings
++    if (elapsedTime < 250000 && durationMs <= 750) {
++        return;
++    }
++
++    if (durationMs <= mPreviousInteractionDuration) {
++        // don't hint if previous hint's duration covers this hint's duration
++        if (elapsedTime <= (mPreviousInteractionDuration - durationMs)) {
++            return;
++        }
++    }
++
++    mPreviousInteractionTime = currentInteractionTime;
++    mPreviousInteractionDuration = durationMs;
++
++    // most vendors don't implement the AOSP interaction hint in
++    // powerscntbl.xml, but MTKPOWER_HINT_UX_SCROLLING is guaranteed to
++    // be implemented on vendors newer than S.
++    int interactionHandle = mPerf->CusLockHint(MTKPOWER_HINT_UX_SCROLLING, durationMs, getpid());
++
++    if (mPreviousInteractionHandle > 0) {
++        mPerf->LockRel(mPreviousInteractionHandle);
++    }
++    mPreviousInteractionHandle = interactionHandle;
++}
++
++ndk::ScopedAStatus Power::setMode(Mode type, bool enabled) {
++    LOG(VERBOSE) << "Power setMode: " << static_cast<int32_t>(type) << " to: " << enabled;
++
++#ifdef MODE_EXT
++    if (setDeviceSpecificMode(type, enabled)) {
++        return ndk::ScopedAStatus::ok();
++    }
++#endif
++    switch (type) {
++#ifdef TAP_TO_WAKE_NODE
++        case Mode::DOUBLE_TAP_TO_WAKE: {
++            ::android::base::WriteStringToFile(enabled ? "1" : "0", TAP_TO_WAKE_NODE, true);
++            break;
++        }
++#endif
++        case Mode::LAUNCH: {
++            if (mLaunchHandle > 0) {
++                mPerf->LockRel(mLaunchHandle);
++                mLaunchHandle = 0;
++            }
++
++            if (enabled) {
++                mLaunchHandle =
++                        mPerf->CusLockHint(MTKPOWER_HINT_LAUNCH, kLaunchBoostDuration, getpid());
++            }
++            break;
++        }
++        case Mode::INTERACTIVE: {
++            if (enabled) {
++                // Device is now in an interactive state,
++                // resume all previously performing hints.
++                mPerf->UserScnRestoreAll();
++            } else {
++                // Device is entering a non interactive state,
++                // disable all hints to save power.
++                mPerf->UserScnDisableAll();
++            }
++            break;
++        }
++        default:
++            break;
++    }
++    return ndk::ScopedAStatus::ok();
++}
++
++ndk::ScopedAStatus Power::isModeSupported(Mode type, bool* _aidl_return) {
++    LOG(INFO) << "Power isModeSupported: " << static_cast<int32_t>(type);
++
++#ifdef MODE_EXT
++    if (isDeviceSpecificModeSupported(type, _aidl_return)) {
++        return ndk::ScopedAStatus::ok();
++    }
++#endif
++
++    switch (type) {
++#ifdef TAP_TO_WAKE_NODE
++        case Mode::DOUBLE_TAP_TO_WAKE:
++#endif
++        case Mode::LAUNCH:
++        case Mode::INTERACTIVE:
++            *_aidl_return = true;
++            break;
++        default:
++            break;
++    }
++
++    return ndk::ScopedAStatus::ok();
++}
++
++ndk::ScopedAStatus Power::setBoost(Boost type, int32_t durationMs) {
++    if (type == Boost::INTERACTION) {
++        LOG(VERBOSE) << "Power setBoost INTERACTION for: " << durationMs << "ms";
++        handleInteractionHint(durationMs);
++        return ndk::ScopedAStatus::ok();
++    }
++
++    LOG(ERROR) << "Power unknown boost type: " << static_cast<int32_t>(type);
++    return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus Power::isBoostSupported(Boost type, bool* _aidl_return) {
++    LOG(INFO) << "Power isBoostSupported: " << static_cast<int32_t>(type);
++
++    *_aidl_return = (type == Boost::INTERACTION);
++    return ndk::ScopedAStatus::ok();
++}
++
++ndk::ScopedAStatus Power::createHintSession(int32_t, int32_t, const std::vector<int32_t>&, int64_t,
++                                            std::shared_ptr<IPowerHintSession>* _aidl_return) {
++    *_aidl_return = nullptr;
++    return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++ndk::ScopedAStatus Power::getHintSessionPreferredRate(int64_t* outNanoseconds) {
++    *outNanoseconds = -1;
++    return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++}  // namespace mediatek
++}  // namespace impl
++}  // namespace power
++}  // namespace hardware
++}  // namespace android
++}  // namespace aidl
+diff --git a/aidl/power-mediatek/Power.h b/aidl/power-mediatek/Power.h
+new file mode 100644
+index 0000000..1dbb704
+--- /dev/null
++++ b/aidl/power-mediatek/Power.h
+@@ -0,0 +1,60 @@
++/*
++ * SPDX-FileCopyrightText: 2020 The Android Open Source Project
++ * SPDX-FileCopyrightText: 2023 The LineageOS Project
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#pragma once
++
++#include "types.h"
++
++#include <aidl/android/hardware/power/BnPower.h>
++
++namespace aidl {
++namespace android {
++namespace hardware {
++namespace power {
++namespace impl {
++namespace mediatek {
++
++const std::string kTouchBoostDurationProperty = "persist.vendor.powerhal.touchboost_duration";
++const int32_t kDefaultTouchBoostDuration = 1; /* ms */
++const int32_t kLaunchBoostDuration = 30000;   /* ms */
++const int32_t kMaxInteractiveDuration = 5000; /* ms */
++const int32_t kMinInteractiveDuration = 400;  /* ms */
++const int32_t kMaxTouchBoostDuration = 1000;  /* ms */
++
++class Power : public BnPower {
++  public:
++    Power();
++    ~Power();
++    ndk::ScopedAStatus setMode(Mode type, bool enabled) override;
++    ndk::ScopedAStatus isModeSupported(Mode type, bool* _aidl_return) override;
++    ndk::ScopedAStatus setBoost(Boost type, int32_t durationMs) override;
++    ndk::ScopedAStatus isBoostSupported(Boost type, bool* _aidl_return) override;
++    ndk::ScopedAStatus createHintSession(int32_t tgid, int32_t uid,
++                                         const std::vector<int32_t>& threadIds,
++                                         int64_t durationNanos,
++                                         std::shared_ptr<IPowerHintSession>* _aidl_return) override;
++    ndk::ScopedAStatus getHintSessionPreferredRate(int64_t* outNanoseconds) override;
++
++  private:
++    static long long calcTimespanUs(struct timespec start, struct timespec end);
++    void handleInteractionHint(int32_t targetDuration);
++
++    libpowerhal_t* mPerf;
++
++    struct timespec mPreviousInteractionTime;
++    int32_t mTouchBoostDuration;
++    int32_t mPreviousInteractionDuration;
++    int32_t mPreviousInteractionHandle;
++    int32_t mLaunchHandle;
++};
++
++}  // namespace mediatek
++}  // namespace impl
++}  // namespace power
++}  // namespace hardware
++}  // namespace android
++}  // namespace aidl
+diff --git a/aidl/power-mediatek/android.hardware.power-service-mediatek.rc b/aidl/power-mediatek/android.hardware.power-service-mediatek.rc
+new file mode 100644
+index 0000000..5c8fe3d
+--- /dev/null
++++ b/aidl/power-mediatek/android.hardware.power-service-mediatek.rc
+@@ -0,0 +1,5 @@
++service vendor.power-mediatek /vendor/bin/hw/android.hardware.power-service-mediatek
++    interface aidl android.hardware.power.IPower/default
++    class hal
++    user system
++    group system
+diff --git a/aidl/power-mediatek/power-mtk.xml b/aidl/power-mediatek/power-mtk.xml
+new file mode 100644
+index 0000000..9f56deb
+--- /dev/null
++++ b/aidl/power-mediatek/power-mtk.xml
+@@ -0,0 +1,7 @@
++<manifest version="1.0" type="device">
++    <hal format="aidl">
++        <name>android.hardware.power</name>
++        <version>2</version>
++        <fqname>IPower/default</fqname>
++    </hal>
++</manifest>
+diff --git a/aidl/power-mediatek/service.cpp b/aidl/power-mediatek/service.cpp
+new file mode 100644
+index 0000000..8f4e240
+--- /dev/null
++++ b/aidl/power-mediatek/service.cpp
+@@ -0,0 +1,24 @@
++/*
++ * SPDX-FileCopyrightText: 2024 The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <android-base/logging.h>
++#include <android/binder_manager.h>
++#include <android/binder_process.h>
++
++#include "Power.h"
++
++using aidl::android::hardware::power::impl::mediatek::Power;
++
++int main() {
++    ABinderProcess_setThreadPoolMaxThreadCount(0);
++    std::shared_ptr<Power> power = ndk::SharedRefBase::make<Power>();
++
++    const std::string instance = std::string() + Power::descriptor + "/default";
++    binder_status_t status = AServiceManager_addService(power->asBinder().get(), instance.c_str());
++    CHECK(status == STATUS_OK);
++
++    ABinderProcess_joinThreadPool();
++    return EXIT_FAILURE;  // should not reach
++}
+diff --git a/aidl/power-mediatek/types.h b/aidl/power-mediatek/types.h
+new file mode 100644
+index 0000000..c214c1f
+--- /dev/null
++++ b/aidl/power-mediatek/types.h
+@@ -0,0 +1,25 @@
++/*
++ * SPDX-FileCopyrightText: 2023 The LineageOS Project
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#pragma once
++
++#define POWERHAL_LIB_NAME "libpowerhal.so"
++
++#define MTKPOWER_HINT_LAUNCH 11
++#define MTKPOWER_HINT_APP_TOUCH 25
++#define MTKPOWER_HINT_UX_SCROLLING 43
++
++#define USINSEC 1000000L
++#define NSINUS 1000L
++
++typedef struct libpowerhal_t {
++    void* perfLib;
++    void (*Init)(int32_t);
++    void (*LockRel)(int32_t);
++    void (*UserScnDisableAll)(void);
++    void (*UserScnRestoreAll)(void);
++    int32_t (*CusLockHint)(int32_t, int32_t, __pid_t);
++} libpowerhal_t;

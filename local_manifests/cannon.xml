@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Xiaomi cannon / cannong (MT6853T) — LineageOS 21 (A14)
+
+  【2026-10-31 重构】原 12 个"无上游历史 patch 快照仓"(top-android/android_*)已归档删除。
+  AOSP 侧改动改为「上游 LineageOS/AOSP + build-time 补丁」复现：
+     补丁 = repro/patches/a14_orphan/*.patch
+     应用 = scripts/apply_a14_cannon_patches.sh（build.sh 的 all/a14 流程自动调用，幂等）
+
+  因此，凡 LineageOS default.xml 已声明的 project 本文件不再覆盖（避免丢掉 build/make 的
+  <linkfile> 软链等），直接用上游；补丁在编译前叠加。涉及：
+     build/make、frameworks/base、frameworks/native、frameworks/opt/telephony、
+     packages/modules/{NetworkStack, Bluetooth}、packages/providers/MediaProvider、
+     system/core、packages/apps/Trebuchet。
+  （NetworkStack 在 A14 是 AOSP tag r67，由 default.xml 的 aosp remote 提供。）
+
+  仍保留 top-android 自有分支的（上游没有 / 有真历史 / 结构独立）：
+     device/vendor/kernel、签名 keys、packages/modules/Wifi（A14 Wifi HAL fork，未删）、
+     hardware/mediatek/wlan（上游 LineageOS 无独立仓=android_hardware_mediatek 的子目录）。
+  hardware/mediatek 与 packages/apps/Jelly：上游 LineageOS 存在但不在 default.xml，显式指上游+补丁。
+-->
+<manifest>
+    <remote name="top"     fetch="ssh://git@github.com/top-android" />
+    <remote name="lineage" fetch="https://github.com/LineageOS" />
+
+    <!-- ================= 自有仓库（top-android 分支） ================= -->
+    <project path="device/xiaomi/cannon"
+             name="android_device_xiaomi_cannon"
+             remote="top" revision="lineage-21-cannon" />
+
+    <project path="vendor/xiaomi/cannon"
+             name="android_vendor_xiaomi_cannon"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- 内核默认无 KSU（lineage-21-cannon），与 release zip 一致；KSU boot 变体另刷 -->
+    <project path="kernel/xiaomi/cannon"
+             name="android_kernel_xiaomi_cannon"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- 签名密钥（必须 private；走 SSH） -->
+    <project path="vendor/lineage-priv/keys"
+             name="android_vendor_lineage-priv_keys"
+             remote="top" revision="main" />
+
+    <!-- Wifi HAL fork：A14 专用修复（wifi_get_supported_feature_set NULL 检查等）；仓未删，继续用自有分支 -->
+    <project path="packages/modules/Wifi"
+             name="android_packages_modules_Wifi"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- wlan HAL：上游 LineageOS 无独立仓（是 android_hardware_mediatek 子目录），
+         保留自有仓 top-android/android_hardware_mediatek_wlan（2026-10-31 已恢复三分支） -->
+    <project path="hardware/mediatek/wlan"
+             name="android_hardware_mediatek_wlan"
+             remote="top" revision="lineage-21-cannon" />
+
+    <!-- ================= 上游 LineageOS（不在 default.xml，显式声明）+ 补丁 ================= -->
+    <!-- MTK power 适配（aidl/hidl）补丁由 apply_a14 施加 -->
+    <project path="hardware/mediatek"
+             name="android_hardware_mediatek"
+             remote="lineage" revision="lineage-21" />
+
+    <!-- Jelly: 拦 baiduboxapp:// 等 scheme 劫持补丁由 apply_a14 施加 -->
+    <project path="packages/apps/Jelly"
+             name="android_packages_apps_Jelly"
+             remote="lineage" revision="lineage-21.0" />
+
+    <!-- ================= 无改动，直接用上游 ================= -->
+    <project path="device/mediatek/sepolicy_vndr"
+             name="android_device_mediatek_sepolicy_vndr"
+             remote="lineage" revision="lineage-21" />
+
+    <project path="hardware/xiaomi"
+             name="android_hardware_xiaomi"
+             remote="lineage" revision="lineage-21" />
+</manifest>

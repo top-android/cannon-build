@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  cannon A17 local_manifests（LineageOS 24.0 / Android 17，分支 lineage-24.0）
+
+  用法：build.sh 的 a17 profile 会把它安装为 <rom>/.repo/local_manifests/cannon.xml，
+        配合 `repo init -u LineageOS/android.git -b lineage-24.0`。
+
+  组织方式（沿用 A16 已验路线 + 5 仓双轨）：
+    - “我们自有、上游 LineageOS 没有 / 有真历史”的 5 个仓（device/vendor/kernel/wlan/Wifi）
+      各自带 lineage-24.0-cannon 分支（由 lineage-23.2-cannon 作为基线派生，见构建说明）；
+      repo sync 即得“干净 checkout = 该分支当前态”。
+      同时在 repro/patches/a17/ 保留含二进制 patch 作为记录/可移植（apply_a17 幂等重放）。
+    - 其余 AOSP 侧改动一律走 LineageOS 上游 + build-time 补丁（scripts/apply_a17_cannon_patches.sh），
+      不为每仓建 fork。
+  前置：5 自有仓须已有 lineage-24.0-cannon 分支（已 push 到 top-android），否则 sync 会失败。
+  [待验证 2026-11-03] 上游 LineageOS/android.git 及各 section-2 仓已确认存在 lineage-24.0 分支。
+-->
+<manifest>
+    <remote name="devs" fetch="https://github.com" />
+    <!-- 私有仓（keys）走 SSH：无可匿名访问的 https 入口 -->
+    <remote name="top-ssh" fetch="ssh://git@github.com/top-android" />
+
+    <!-- ===================== 1) 自有仓（5 个，A17 = lineage-24.0-cannon） ===================== -->
+    <project path="device/xiaomi/cannon"
+             name="top-android/android_device_xiaomi_cannon"
+             remote="devs" revision="lineage-24.0-cannon" />
+
+    <project path="vendor/xiaomi/cannon"
+             name="top-android/android_vendor_xiaomi_cannon"
+             remote="devs" revision="lineage-24.0-cannon" />
+
+    <!-- 内核 4.14.336（基线派生自 lineage-23.2-cannon） -->
+    <project path="kernel/xiaomi/cannon"
+             name="top-android/android_kernel_xiaomi_cannon"
+             remote="devs" revision="lineage-24.0-cannon" />
+
+    <!-- 设备专有 WiFi HAL（上游 LineageOS 无独立仓，是 hardware/mediatek 子目录） -->
+    <project path="hardware/mediatek/wlan"
+             name="top-android/android_hardware_mediatek_wlan"
+             remote="devs" revision="lineage-24.0-cannon" />
+
+    <!-- Wifi 框架 fork（老 vendor getFeatureSet/getWakeReason 空指针旁路等修复）
+         上游 lineage-24.0 主 manifest 已含 packages/modules/Wifi，须先 remove 再 override -->
+    <remove-project name="LineageOS/android_packages_modules_Wifi" />
+    <project path="packages/modules/Wifi"
+             name="top-android/android_packages_modules_Wifi"
+             remote="devs" revision="lineage-24.0-cannon" />
+
+    <!-- ===================== 2) 走上游 lineage-24.0，补丁 build-time apply ===================== -->
+    <project path="hardware/mediatek"
+             name="LineageOS/android_hardware_mediatek"
+             remote="devs" revision="lineage-24.0" />
+
+    <project path="hardware/xiaomi"
+             name="LineageOS/android_hardware_xiaomi"
+             remote="devs" revision="lineage-24.0" />
+
+    <project path="device/mediatek/sepolicy_vndr"
+             name="LineageOS/android_device_mediatek_sepolicy_vndr"
+             remote="devs" revision="lineage-24.0" />
+
+    <!-- ===================== 3) 不在本清单的 AOSP 侧补丁项目 =====================
+         build/make, build/soong, art, frameworks/base, frameworks/native,
+         frameworks/opt/net/wifi, frameworks/opt/telephony, system/core, system/libhidl,
+         packages/modules/{Bluetooth,Connectivity,NetworkStack}, packages/providers/MediaProvider,
+         packages/apps/{Settings,Jelly,Launcher3}, hardware/lineage/compat, vendor/lineage
+         —— 来自 A17 主 manifest，不 override；由 apply_a17_cannon_patches.sh 在编译前打
+         （按症状签名重定位到 A17 源码，勿照抄 A16 行号）。 -->
+
+    <!-- ===================== 4) 私有签名/AVB key（关键，勿删，仅存在于 rom，不入配置仓） ===================== -->
+    <project path="vendor/lineage-priv/keys"
+             name="android_vendor_lineage-priv_keys"
+             remote="top-ssh" revision="main" />
+</manifest>

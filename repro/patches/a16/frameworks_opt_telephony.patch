@@ -1,0 +1,179 @@
+diff --git a/src/java/com/android/internal/telephony/RIL.java b/src/java/com/android/internal/telephony/RIL.java
+index 819609e..7acbc5f 100644
+--- a/src/java/com/android/internal/telephony/RIL.java
++++ b/src/java/com/android/internal/telephony/RIL.java
+@@ -290,6 +290,19 @@ public class RIL extends BaseCommands implements CommandsInterface {
+ 
+     static final String[] HIDL_SERVICE_NAME = {"slot1", "slot2", "slot3"};
+ 
++    /**
++     * cannon: 恢复 Android 12 之后被移除的静态工具方法。原厂 A12 的 IMS 栈
++     * (com.mediatek.ims) 静态调用它，缺了会 NoSuchMethodError。仅恢复行为，无副作用。
++     * @hide
++     */
++    public static byte[] arrayListToPrimitiveArray(ArrayList<Byte> bytes) {
++        byte[] ret = new byte[bytes.size()];
++        for (int i = 0; i < ret.length; i++) {
++            ret[i] = bytes.get(i);
++        }
++        return ret;
++    }
++
+     private static final Map<String, Integer> FEATURES_TO_SERVICES = Map.ofEntries(
+             Map.entry(PackageManager.FEATURE_TELEPHONY_CALLING, HAL_SERVICE_VOICE),
+             Map.entry(PackageManager.FEATURE_TELEPHONY_DATA, HAL_SERVICE_DATA),
+@@ -682,7 +695,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+             } else {
+                 try {
+                     mRadioProxy = android.hardware.radio.V1_6.IRadio.getService(
+-                            HIDL_SERVICE_NAME[mPhoneId], true);
++                            HIDL_SERVICE_NAME[mPhoneId], false);
+                     mHalVersion.put(HAL_SERVICE_RADIO, RADIO_HAL_VERSION_1_6);
+                 } catch (NoSuchElementException e) {
+                 }
+@@ -690,7 +703,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                 if (mRadioProxy == null) {
+                     try {
+                         mRadioProxy = android.hardware.radio.V1_5.IRadio.getService(
+-                                HIDL_SERVICE_NAME[mPhoneId], true);
++                                HIDL_SERVICE_NAME[mPhoneId], false);
+                         mHalVersion.put(HAL_SERVICE_RADIO, RADIO_HAL_VERSION_1_5);
+                     } catch (NoSuchElementException e) {
+                     }
+@@ -699,7 +712,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                 if (mRadioProxy == null) {
+                     try {
+                         mRadioProxy = android.hardware.radio.V1_4.IRadio.getService(
+-                                HIDL_SERVICE_NAME[mPhoneId], true);
++                                HIDL_SERVICE_NAME[mPhoneId], false);
+                         mHalVersion.put(HAL_SERVICE_RADIO, RADIO_HAL_VERSION_1_4);
+                     } catch (NoSuchElementException e) {
+                     }
+@@ -917,7 +930,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                         mHalVersion.put(service, RADIO_HAL_VERSION_1_6);
+                         serviceProxy.setHidl(mHalVersion.get(service),
+                                 android.hardware.radio.V1_6.IRadio.getService(
+-                                        HIDL_SERVICE_NAME[mPhoneId], true));
++                                        HIDL_SERVICE_NAME[mPhoneId], false));
+                     } catch (NoSuchElementException e) {
+                     }
+                 }
+@@ -928,7 +941,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                         mHalVersion.put(service, RADIO_HAL_VERSION_1_5);
+                         serviceProxy.setHidl(mHalVersion.get(service),
+                                 android.hardware.radio.V1_5.IRadio.getService(
+-                                        HIDL_SERVICE_NAME[mPhoneId], true));
++                                        HIDL_SERVICE_NAME[mPhoneId], false));
+                     } catch (NoSuchElementException e) {
+                     }
+                 }
+@@ -939,7 +952,7 @@ public class RIL extends BaseCommands implements CommandsInterface {
+                         mHalVersion.put(service, RADIO_HAL_VERSION_1_4);
+                         serviceProxy.setHidl(mHalVersion.get(service),
+                                 android.hardware.radio.V1_4.IRadio.getService(
+-                                        HIDL_SERVICE_NAME[mPhoneId], true));
++                                        HIDL_SERVICE_NAME[mPhoneId], false));
+                     } catch (NoSuchElementException e) {
+                     }
+                 }
+diff --git a/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java b/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
+index c500a19..33e71e0 100644
+--- a/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
++++ b/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
+@@ -234,6 +234,15 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
+     private static final boolean VERBOSE_STATE_LOGGING = FORCE_VERBOSE_STATE_LOGGING ||
+             Rlog.isLoggable(VERBOSE_STATE_TAG, Log.VERBOSE);
+     private static final int CONNECTOR_RETRY_DELAY_MS = 5000; // 5 seconds.
++    // [cannon][A16] MTK legacy IMS does not register on cold boot because the framework pushes the
++    // IMS capability config before MTK's carrier-config/ImsConfig subsystem is ready. Replay the
++    // proven-good manual "VoLTE off->on" toggle a little after carrier config is loaded.
++    private static final int BOOT_VOLTE_REAPPLY_DELAY_MS = 12000;      // wait before first replay
++    // MTK 实测在 BOOT_COMPLETED 前(≈开机+13s)就已就绪，45s 余量过剩；12s 足够，慢开机靠 3 次重试兜底。
++    private static final int BOOT_VOLTE_REAPPLY_TOGGLE_GAP_MS = 6000;  // off -> on gap
++    // MTK 走 +EIMSCFG AT 到 modem：OFF 的 AT 事务需 >=~5s 落定，3s 会让 ON 被合并/丢弃
++    // （实测：3.0s 间隔 ON 空转不注册；手动 5.3s 间隔 5s 后注册成功）→ 取 6s 留余量。
++    private static final int BOOT_VOLTE_REAPPLY_RETRY_MS = 30000;      // wait before retry check
+ 
+     private MmTelFeature.MmTelCapabilities mMmTelCapabilities =
+             new MmTelFeature.MmTelCapabilities();
+@@ -766,6 +775,9 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
+     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
+     private ImsManager mImsManager;
+     private ImsUtInterface mUtInterface;
++    // [cannon][A16] one-shot guard for the boot-time VoLTE re-apply workaround.
++    private boolean mBootVolteReapplyArmed = false;
++    private int mBootVolteReapplyTries = 0;
+ 
+     private Call.SrvccState mSrvccState = Call.SrvccState.NONE;
+ 
+@@ -1906,6 +1918,70 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
+                 mThresholdRtpPacketLoss, mThresholdRtpJitter, mThresholdRtpInactivityTime);
+         updateAllowedServices(ImsRegistrationImplBase.REGISTRATION_TECH_LTE);
+         updateAllowedServices(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN);
++
++        // [cannon][A16] Arm the boot-time VoLTE re-apply workaround (see scheduleBootVolteReapply).
++        scheduleBootVolteReapply();
++    }
++
++    /**
++     * [cannon][A16][old-vendor-new-android] On cold boot the framework pushes the IMS capability
++     * config (changeMmTelCapability -> MtkMmTelFeature setFeatureValue) before MTK's legacy IMS
++     * carrier-config/ImsConfig subsystem is ready, so MTK ends up with "Voice:false" and stays
++     * OUT_OF_SERVICE. A manual VoLTE off->on re-pushes it once everything is ready and registers
++     * successfully. Replay that exact toggle once, a bit after carrier config is loaded, guarded so
++     * we never fight an already-registered state or a user-disabled VoLTE setting.
++     */
++    private void scheduleBootVolteReapply() {
++        if (mBootVolteReapplyArmed) {
++            return;
++        }
++        mBootVolteReapplyArmed = true;
++        postDelayed(this::bootVolteReapplyOnce, BOOT_VOLTE_REAPPLY_DELAY_MS);
++    }
++
++    private void bootVolteReapplyOnce() {
++        final ImsManager mgr = mImsManager;
++        if (mgr == null) {
++            return;
++        }
++        if (getPhone() != null && getPhone().getImsRegistrationTech() != -1) {
++            logi("bootVolteReapply: IMS already registered, skip");
++            return;
++        }
++        try {
++            if (!mgr.isEnhanced4gLteModeSettingEnabledByUser()) {
++                logi("bootVolteReapply: user VoLTE setting disabled, skip");
++                return;
++            }
++        } catch (Exception e) {
++            loge("bootVolteReapply: query user VoLTE setting failed: " + e);
++            return;
++        }
++        mBootVolteReapplyTries++;
++        logi("bootVolteReapply: replay VoLTE off->on to force MTK IMS registration, try="
++                + mBootVolteReapplyTries);
++        try {
++            mgr.setEnhanced4gLteModeSetting(false);
++        } catch (Exception e) {
++            loge("bootVolteReapply: setEnhanced4gLteModeSetting(false) failed: " + e);
++        }
++        postDelayed(() -> {
++            try {
++                mgr.setEnhanced4gLteModeSetting(true);
++            } catch (Exception e) {
++                loge("bootVolteReapply: setEnhanced4gLteModeSetting(true) failed: " + e);
++            }
++            postDelayed(() -> {
++                if (mBootVolteReapplyTries < 3
++                        && getPhone() != null
++                        && getPhone().getImsRegistrationTech() == -1) {
++                    bootVolteReapplyOnce();
++                } else {
++                    logi("bootVolteReapply: done, regTech="
++                            + (getPhone() == null ? "null" : getPhone().getImsRegistrationTech()));
++                }
++            }, BOOT_VOLTE_REAPPLY_RETRY_MS);
++        }, BOOT_VOLTE_REAPPLY_TOGGLE_GAP_MS);
+     }
+ 
+     /**
