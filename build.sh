@@ -4,12 +4,16 @@
 #   ./build.sh doctor   环境体检
 #   ./build.sh init     repo init + 安装 local_manifests
 #   ./build.sh sync     repo sync
+#   ./build.sh apply    只重放构建期补丁（幂等）
 #   ./build.sh build    lunch + m bacon
 #   ./build.sh all      init + sync + apply 补丁 + build（A14 / LineageOS 21，默认）
 #   ./build.sh a14      同 all（A14，显式别名）
 #   ./build.sh a15      A15 专用：init + sync + apply 补丁 + build（LineageOS 22.2）
 #   ./build.sh a16      A16 专用：init + sync + apply 补丁 + build（LineageOS 23.2 / Android 16）
 #   ./build.sh a17      A17 专用：init + sync + apply 补丁 + build（LineageOS 24.0 / Android 17）
+#
+# A17 推荐走 ./build-a17.sh（锁定清单模式，默认 PROFILE=a17 CANNON_VARIANT=userdebug，
+# 用 manifests/a17-pinned-*.xml 的全 SHA 清单 init，保证每次 sync 出的树一致）。
 #
 # 【2026-10-31】A14 也改为「上游 LineageOS/AOSP + build-time 补丁」：
 #   原 top-android/android_* 快照仓已删，A14 现在与 A15/A16 同一套 apply 机制
@@ -31,6 +35,10 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 # ---- local_manifests 与补丁开关（A14 默认 = 上游 + patch）----
 LOCAL_MANIFEST_NAME="${LOCAL_MANIFEST_NAME:-cannon.xml}"
 APPLY_PATCHES="${APPLY_PATCHES:-1}"                       # A14 也走 build-time 补丁（原快照仓已删）
+# 非空 = 锁定清单模式：cmd_init 不再装 local_manifests + 跟分支，而是用
+# `repo manifest -r` 导出的全 SHA 清单（见 manifests/ 与 build-a17.sh）。
+# 取值：绝对路径 / 相对本仓的路径 / "latest"（manifests/ 下最新的 .xml）。
+PINNED_MANIFEST="${PINNED_MANIFEST:-}"
 # ---- 按 profile 选择的辅助变量（A14 默认值见下；a15/a16 profile 覆盖）----
 LUNCH_ARGS=()          # 非空时 cmd_build 用多参 lunch（A16 需三参：product release variant）
 APPLY_SCRIPT="$SRC_DIR/scripts/apply_a14_cannon_patches.sh"   # A14 默认补丁脚本
@@ -137,6 +145,10 @@ cmd_doctor() {
 }
 
 cmd_init() {
+    if [ -n "${PINNED_MANIFEST:-}" ]; then
+        cmd_init_pinned
+        return 0
+    fi
     step "repo init → $ROM_DIR ($MANIFEST_BRANCH)"
     mkdir -p "$ROM_DIR"
     cd "$ROM_DIR"
@@ -148,6 +160,40 @@ cmd_init() {
     [ -f "$SRC_DIR/local_manifests/$LOCAL_MANIFEST_NAME" ] || die "缺 local_manifests/$LOCAL_MANIFEST_NAME"
     cp "$SRC_DIR/local_manifests/$LOCAL_MANIFEST_NAME" .repo/local_manifests/cannon.xml
     c_grn "已写入 .repo/local_manifests/cannon.xml（源=$LOCAL_MANIFEST_NAME）"
+}
+
+# 锁定清单 init：每个 project 都钉在 40 位 SHA 上，sync 出来的树与导出当天完全一致。
+# 注意两点（与分支模式的区别）：
+#   1) 不用 --depth=1：浅克隆只有分支 tip，钉的 SHA 可能不在里面，sync 会报错。
+#   2) 锁定清单本身已经包含 local_manifests 的内容（repo manifest -r 是合并后的结果），
+#      所以要把 .repo/local_manifests 挪开，否则同一 project 定义两次。
+cmd_init_pinned() {
+    local pm="$PINNED_MANIFEST"
+    case "$pm" in
+        /*)     ;;
+        latest) pm="$(ls -1t "$SRC_DIR"/manifests/*.xml 2>/dev/null | head -1 || true)"
+                [ -n "$pm" ] || die "manifests/ 下没有锁定清单（先 repo manifest -r -o ...）" ;;
+        *)      pm="$SRC_DIR/$pm" ;;
+    esac
+    [ -f "$pm" ] || die "找不到锁定清单: $pm"
+    local name; name="$(basename "$pm")"
+
+    step "repo init → $ROM_DIR（先建 .repo，分支 $MANIFEST_BRANCH）"
+    mkdir -p "$ROM_DIR"
+    cd "$ROM_DIR"
+    $(repo_bin) init -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH" \
+        --git-lfs -g default,-notdefault,-infra --no-clone-bundle
+
+    step "切换到锁定清单 $name"
+    mkdir -p .repo/manifests
+    cp "$pm" ".repo/manifests/$name"
+    if [ -d .repo/local_manifests ]; then
+        local bak=".repo/local_manifests.bak.$(date +%Y%m%d%H%M%S)"
+        mv .repo/local_manifests "$bak"
+        c_ylw "已把 .repo/local_manifests 移到 $bak（锁定清单已含自有仓，避免重复 project）"
+    fi
+    $(repo_bin) init -m "$name"
+    c_grn "已切到锁定清单: $name（全 SHA，不再跟分支）"
 }
 
 cmd_sync() {
@@ -310,6 +356,7 @@ case "${1:-}" in
     doctor) cmd_doctor ;;
     init)   cmd_init ;;
     sync)   cmd_sync ;;
+    apply)  cmd_apply ;;
     build)  cmd_build ;;
     module) shift; cmd_module "$@" ;;
     all)    cmd_init; cmd_sync; cmd_apply; cmd_build ;;

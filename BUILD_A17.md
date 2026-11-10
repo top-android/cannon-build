@@ -79,18 +79,29 @@ BpfHandler / NetdUpdatable / ClatCoordinator 失败不 abort。
 
 代价：netd 拿不到 BPF 程序，socket tagging、data saver、cgroup 策略降级。
 
-## 复现「当期树」（锁定清单）
+## 复现「当期树」（锁定清单 / build-a17.sh）
 
 `local_manifests/cannon-a17.xml` 里公有上游仓跟的是 `refs/heads/lineage-24.0`（移动分支），
 `repo sync` 拿到的 HEAD 会随上游前进 —— 那时 `repro/patches/a17/*.patch`（按导出当天的 HEAD
-生成）就可能 drift。要 1:1 复现当期树，用 `repo manifest -r` 导出的锁定清单：
+生成）就可能 drift。要 1:1 复现当期树，用 **`build-a17.sh`**（A17 专用入口，默认锁定清单模式）：
+
+```bash
+cd /cannon/cannon-build
+./build-a17.sh all          # init（锁定清单）+ sync + apply 补丁 + build
+# 或分步：init / sync / apply / build / module <target>
+```
+
+它做的事和 `PROFILE=a17 CANNON_VARIANT=userdebug ./build.sh ...` 完全一样，**只有 init/sync 不同**：
+不再装 `local_manifests/cannon-a17.xml` 跟分支，而是把 `manifests/a17-pinned-*.xml`
+（默认取最新的那份）装进 `.repo/manifests/` 再 `repo init -m`，1241 个 project 全钉在 40 位 SHA。
+`build.sh` 里对应 `PINNED_MANIFEST=<路径|latest>`，手工等价操作：
 
 ```bash
 cd /cannon/rom
-repo init -u https://github.com/LineageOS/android.git -b lineage-24.0   # 先正常 init
+repo init -u https://github.com/LineageOS/android.git -b lineage-24.0   # 先建 .repo
 cp /cannon/cannon-build/manifests/a17-pinned-2026-11-10.xml .repo/manifests/
 mv .repo/local_manifests .repo/local_manifests.bak    # 锁定清单已含自有仓，避免重复 project
-repo init -m a17-pinned-2026-11-10.xml                # 不重给 -u，沿用上面的 url/branch
+repo init -m a17-pinned-2026-11-10.xml
 repo sync -c -j8
 ```
 
@@ -107,6 +118,8 @@ bash /cannon/cannon-build/scripts/check_a17_pinned.sh \
 # 一致 1197 / 不一致 0 / 缺失 0 / 未锁定 0
 ```
 
-> `build.sh init` 会把 `local_manifests/cannon-a17.xml` 重新装回去并 `repo init` 到**分支模式**，
-> 那之后就不再是锁定的树了。要锁定状态就别再跑 `build.sh init`；日常 `build` 不受影响
-> （它只 lunch + 编，不重做 init）。
+> 注意区分入口：
+> - `./build-a17.sh ...` → 锁定清单模式（推荐，树可复现）
+> - `PROFILE=a17 ./build.sh init` → 分支模式（装 `local_manifests/cannon-a17.xml`，
+>   树随上游前进）。`build.sh build/module` 不重做 init，所以已经在锁定树上时
+>   继续 `./build-a17.sh build` 不会破坏锁定状态。

@@ -11,10 +11,16 @@ clone 本仓 → 一条 `./build.sh` → 出包，不依赖任何本机手工改
 | `./build.sh a15` | 22.2 | 15 | `bp1a` | `user` | `lineage_cannon-bp1a-user` |
 | `./build.sh a16` | 23.2 | 16 | `bp4a` | `user` | `lineage_cannon bp4a user` |
 | `./build.sh a17` | 24.0 | 17 | `cp2a` | `userdebug` | `lineage_cannon cp2a userdebug` |
+| `./build-a17.sh all` | 24.0 | 17 | `cp2a` | `userdebug` | 同上（**锁定清单模式**，见下） |
 
 A16 / A17 的 lunch 是三参（product / release / variant），A14 / A15 是单串。
 
 A17 的固定命令、环境变量与内核路线见 [`BUILD_A17.md`](BUILD_A17.md)。
+
+> **A17 建议用 `./build-a17.sh`**：它固定 `PROFILE=a17 CANNON_VARIANT=userdebug`，
+> 且 init/sync 用 `manifests/a17-pinned-*.xml`（1241 个 project 全钉 SHA）而不是
+> `local_manifests` + 分支，保证 `repo sync` 出来的树与补丁导出当天一致。
+> 校验：`bash scripts/check_a17_pinned.sh manifests/a17-pinned-*.xml`。
 
 ## 前置条件
 
@@ -30,18 +36,21 @@ git clone git@github.com:top-android/cannon-build.git
 cd cannon-build
 
 ./build.sh doctor     # 环境体检
-./build.sh a17        # init + sync + apply 补丁 + build
+./build-a17.sh all    # A17：锁定清单 init + sync + apply 补丁 + build
 ```
 
 分步执行：
 
 | 命令 | 作用 |
 |---|---|
-| `./build.sh init` | `repo init` + 安装 `local_manifests/<profile>.xml` |
+| `./build.sh init` | `repo init` + 安装 `local_manifests/<profile>.xml`（分支模式） |
 | `./build.sh sync` | `repo sync` |
 | `./build.sh apply` | 重放构建期补丁（幂等） |
 | `./build.sh build` | `lunch` + `m bacon` |
 | `./build.sh module <target>` | 单模块编译，共用同一套环境与日志 |
+
+`build-a17.sh` 支持同样的子命令（`doctor/init/sync/apply/build/module/all`），只是 init 走锁定清单；
+`PINNED_MANIFEST=<路径|latest>` 可指定用哪份清单。
 
 `PROFILE=<a15\|a16\|a17>` 可让 `all` 使用指定 profile（不设即 A14 默认）；`a15` / `a16` / `a17` 子命令自带 profile。
 
