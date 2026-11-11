@@ -1,7 +1,7 @@
 # cannon-build
 
 Xiaomi Redmi Note 9T 5G（`cannon` / `cannong`，MT6853T）在 A12 厂商底座上的 LineageOS 构建入口。
-clone 本仓 → 一条 `./build.sh` → 出包，不依赖任何本机手工改动。
+A17（LineageOS 24.0）走**全 fork 单轨**：clone 本仓 → `./build-a17.sh all` → 出包，不依赖本机手工改动。
 
 ## 支持版本
 
@@ -17,42 +17,86 @@ A16 / A17 的 lunch 是三参（product / release / variant），A14 / A15 是�
 
 A17 的固定命令、环境变量与内核路线见 [`BUILD_A17.md`](BUILD_A17.md)。
 
-> **A17 建议用 `./build-a17.sh`**：它固定 `PROFILE=a17 CANNON_VARIANT=userdebug`，
-> 且 init/sync 用 `manifests/a17-pinned-*.xml`（1241 个 project 全钉 SHA）而不是
-> `local_manifests` + 分支，保证 `repo sync` 出来的树与补丁导出当天一致。
+> **A17 用 `./build-a17.sh`**：它固定 `PROFILE=a17`，init 用 `manifests/a17-pinned-*.xml`
+> （1241 个 project 全钉 SHA），并自动安装 `local_manifests/cannon-a17.xml`
+> （23 个仓指向 `top-android/*` 的 `cannon-a17` 分支）。sync 后**没有 apply 阶段**。
 > 校验：`bash scripts/check_a17_pinned.sh manifests/a17-pinned-*.xml`。
+
+## 全新环境全量编译（从零到 zip）
+
+### 1. 系统依赖（一次性）
+
+```bash
+apt update && apt install -y git repo git-lfs ccache zip unzip \
+  libssl-dev libelf-dev bc bison flex python3 pkg-config
+gh auth login && gh auth setup-git   # 私有 keys 仓走 https 时需要
+```
+
+- 磁盘：源码 ~80G + out ~40G + ccache 50G，建议 ≥200G 可用
+- 内存 + swap ≥ 40G（`-j8 bacon` 的底线）
+- 目录可用 `ROM_DIR` / `OUT_DIR` 覆盖（默认 `/cannon/rom`、`/cannon/out`）
+
+### 2. clone 并编译
+
+```bash
+git clone https://github.com/top-android/cannon-build.git
+cd cannon-build
+
+./build-a17.sh doctor   # 体检：git/python3/ccache/内存/磁盘/签名密钥
+./build-a17.sh all      # init（锁定清单 + cannon-a17.xml）→ sync → build
+```
+
+`all` 里没有 apply 阶段：A17 的修复全部在 `top-android` 各仓的 `cannon-a17` 分支，sync 完即带修复。
+
+### 3. 分步等价
+
+| 命令 | 作用 |
+|---|---|
+| `./build-a17.sh init` | 装 `manifests/a17-pinned-*.xml` + `local_manifests/cannon-a17.xml` |
+| `./build-a17.sh sync` | `repo sync`（首次约 60~80G） |
+| `./build-a17.sh build` | `lunch lineage_cannon cp2a userdebug` + `m bacon` |
+| `./build-a17.sh module <target>` | 单模块编译 |
+
+常见坑：
+
+- 不要用裸 `./build.sh` 跑 A17：它不会设置 A17 profile，会装错 manifest
+- `OUT_DIR` 在源码树外时，脚本会自动建 `$ROM_DIR/out` 软链（siso 要求相对路径）
+- `vendor/lineage-priv/keys` 是私有仓，local manifest 已改成 https（不依赖 SSH key）；
+  没有凭据也能编，但会退回 testkey（`ro.build.tags=test-keys`）
+- 不同变体给独立 `OUT_DIR`，否则触发 installclean 冲掉已有产物
 
 ## 前置条件
 
 - 内存 + swap ≥ 40G
-- 磁盘 ≥ 300G（源码 ~68G + out 100G+ + ccache）
-- `ccache`、`git-lfs`、`python3`，以及 `/usr/bin/python` 软链
-- `~/.ssh/config` 里 `github.com` 走 `ssh.github.com:443`（22 端口被封时）
+- 磁盘 ≥ 200G（源码 ~80G + out 40G + ccache 50G）
+- `ccache`、`git-lfs`、`python3`、`repo`，以及 `/usr/bin/python` 软链
 
-## 使用
+## 使用（A14 / A15 / A16）
+
+A17 见上文「全新环境全量编译」，其它版本：
 
 ```bash
-git clone git@github.com:top-android/cannon-build.git
+git clone https://github.com/top-android/cannon-build.git
 cd cannon-build
 
-./build.sh doctor     # 环境体检
-./build-a17.sh all    # A17：锁定清单 init + sync + apply 补丁 + build
+./build.sh doctor
+./build.sh all      # A14（LineageOS 21）
+./build.sh a15      # A15（22.2）
+./build.sh a16      # A16（23.2）
 ```
-
-分步执行：
 
 | 命令 | 作用 |
 |---|---|
 | `./build.sh init` | `repo init` + 安装 `local_manifests/<profile>.xml`（分支模式） |
 | `./build.sh sync` | `repo sync` |
-| `./build.sh apply` | 重放构建期补丁（幂等） |
+| `./build.sh apply` | 重放构建期补丁（A14–A16 使用；A17 已关闭） |
 | `./build.sh build` | `lunch` + `m bacon` |
 | `./build.sh module <target>` | 单模块编译，共用同一套环境与日志 |
 
-`build-a17.sh` 支持同样的子命令（`doctor/init/sync/apply/build/module/all`），只是 init 走锁定清单；
-`PINNED_MANIFEST=<路径|latest>` 可指定用哪份清单。
+`build-a17.sh` 子命令相同（`doctor/init/sync/apply/build/module/all`），A17 下 `apply` 为空操作；
+`PINNED_MANIFEST=<路径|latest>` 可指定用哪份锁定清单。
 
-`PROFILE=<a15\|a16\|a17>` 可让 `all` 使用指定 profile（不设即 A14 默认）；`a15` / `a16` / `a17` 子命令自带 profile。
+`PROFILE=<a15|a16|a17>` 可让 `all` 使用指定 profile（不设即 A14 默认）；`a15` / `a16` / `a17` 子命令自带 profile。
 
 ## 环境变量
 
@@ -88,19 +132,21 @@ OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh all
 
 ## 仓库布局
 
-改动分两类：**自有分支**（上游没有、或有独立历史）与**构建期补丁**（其余仓指向上游，改动在编译前叠加）。
+A17 是**全 fork 单轨**：23 个需要修复的 project 都指向 `top-android/*` 的 `cannon-a17` 分支，
+`repro/patches/a17` 仅作归档、不参与构建。A14 / A15 / A16 仍沿用「自有分支 + 构建期补丁」。
 
 | 路径 | 来源 | 说明 |
 |---|---|---|
-| `device/xiaomi/cannon` | top-android | 设备树 |
+| `device/xiaomi/cannon` | top-android | 设备树（A17: `cannon-a17`） |
 | `vendor/xiaomi/cannon` | top-android | vendor blob 修正 |
-| `kernel/xiaomi/cannon` | top-android | 内核，默认 `lineage-21-cannon` |
-| `hardware/mediatek/wlan` | top-android | 上游无独立仓 |
+| `kernel/xiaomi/cannon` | top-android | 内核，A17 用 `lineage-24.0-cannon` |
+| `hardware/mediatek` / `hardware/mediatek/wlan` | top-android | 上游无独立仓 |
 | `packages/modules/Wifi` | top-android | HAL 空指针旁路 |
-| `vendor/lineage-priv/keys` | 私有 | 签名密钥，**必须 private** |
-| 其余（`build/make`、`frameworks/*`、`system/core`、`packages/modules/*` 等） | 上游 | 补丁在 `repro/patches/{a14_orphan,a15,a16,a17}` |
+| `vendor/lineage-priv/keys` | 私有 | 签名密钥，**必须 private**（https + gh 凭据） |
+| A17 其余 18 个仓 | top-android | art / build / frameworks / packages / system 等，均 `cannon-a17` |
+| A14–A16 其余仓 | 上游 | 补丁在 `repro/patches/{a14_orphan,a15,a16}` |
 
-补丁由 `scripts/apply_a*.sh` 在编译前重放，幂等；`scripts/export_a16_dirty_patches.sh` 从源码树导出。
+A14–A16 的补丁由 `scripts/apply_a*.sh` 在编译前重放（幂等）；`scripts/export_a16_dirty_patches.sh` 从源码树导出。
 
 ## 签名
 
