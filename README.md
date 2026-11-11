@@ -48,7 +48,29 @@ cd cannon-build
 
 `all` 里没有 apply 阶段：A17 的修复全部在 `top-android` 各仓的 `cannon-a17` 分支，sync 完即带修复。
 
-### 3. 分步等价
+### 3. 选择变体（默认 userdebug）
+
+`CANNON_VARIANT` 控制变体。**每个变体给独立 OUT_DIR**，否则切换会触发 installclean，
+删掉 `out/target/product/cannon/` 下已装好的 system/vendor 等并接近全量重编：
+
+| 变体 | 命令 | 说明 |
+|---|---|---|
+| `userdebug`（默认） | `./build-a17.sh all` | `ro.debuggable=1`，日常调试 |
+| `user` | `OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh all` | 发布包，需要签名 keys |
+| `eng` | `OUT_DIR=/cannon/out-eng CANNON_VARIANT=eng ./build-a17.sh all` | 工程变体，无优化 |
+
+源码已同步、只想换变体出包时用 `build`：
+
+```bash
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh build
+OUT_DIR=/cannon/out-eng  CANNON_VARIANT=eng  ./build-a17.sh build
+```
+
+确实要就地切换同一个 OUT_DIR，必须加 `CANNON_ALLOW_VARIANT_SWITCH=1`（会 installclean）。
+产物分别在各自的 `OUT_DIR/target/product/cannon/` 下，日志仍写 `LOG`（默认 `/cannon/build.log`，
+建议按变体覆盖，如 `LOG=/cannon/build-user.log`）。
+
+### 4. 分步等价
 
 | 命令 | 作用 |
 |---|---|
@@ -115,17 +137,11 @@ cd cannon-build
 其余变量（`SOONG_NINJA`、`CCACHE_EXEC` 等）由 `build.sh` 固定，不要临时增删——会改变编译命令指纹，触发全量重编。
 `GOGC` 由 `build.sh` 设为 `100`，可用同名环境变量覆盖，不影响指纹。
 
-### 切换变体（eng / user）
+### 切换变体的细节
 
-切换变体会让 build 打印 `Build configuration changed ... forcing installclean`，
-删掉 `out/target/product/cannon/` 下已装好的 system / system_ext / product / vendor 和全部 `.img`，
-并因编译参数变化接近全量重编（约 12 万步）。`build-a17.sh` 会比对
-`previous_build_config.mk` 并中止，确实要切加 `CANNON_ALLOW_VARIANT_SWITCH=1`；
-更推荐每个变体独立 OUT_DIR：
-
-```bash
-OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh all
-```
+`build-a17.sh` 会比对 `$OUT_DIR/target/product/cannon/previous_build_config.mk`，变体不一致就中止；
+确定要就地切同一 OUT_DIR 时加 `CANNON_ALLOW_VARIANT_SWITCH=1`（会 installclean，约 12 万步重编）。
+推荐按上文「3. 选择变体」给每个变体独立 OUT_DIR。
 
 > ⚠ `device.mk` 里的 eng ADB 属性矩阵（`ro.secure=0` / `ro.adb.secure=0` / `service.adb.root=1`）
 > 在 `user` 变体里也会写进 `/product/build.prop`，正式发布前必须改回。
