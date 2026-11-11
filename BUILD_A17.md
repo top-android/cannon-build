@@ -1,5 +1,44 @@
 # A17 — LineageOS 24.0 / Android 17
 
+## 新环境全量编译（从零到 zip）
+
+一次性准备：
+
+```bash
+apt update && apt install -y git repo git-lfs ccache zip unzip \
+  libssl-dev libelf-dev bc bison flex python3 pkg-config
+gh auth login && gh auth setup-git   # 私有 keys 仓走 https 时需要
+```
+
+- 磁盘：源码 ~80G + out ~40G + ccache 50G，建议 ≥200G 可用
+- 内存+swap ≥ 40G（`-j8 bacon` 的底线）
+- 目录可用 `ROM_DIR` / `OUT_DIR` 覆盖，默认 `/cannon/rom`、`/cannon/out`
+
+```bash
+git clone https://github.com/top-android/cannon-build.git
+cd cannon-build
+
+./build-a17.sh doctor    # 体检：git/python3/ccache/内存/磁盘/签名密钥
+./build-a17.sh all       # init（锁定清单 + 装 cannon-a17.xml）→ sync → build
+```
+
+`all` 里**没有 apply 阶段**：A17 是全 fork 单轨，修复都在 `top-android` 各仓的 `cannon-a17` 分支里。
+分步等价：
+
+```bash
+./build-a17.sh init    # 自动装 manifests/a17-pinned-*.xml + local_manifests/cannon-a17.xml
+./build-a17.sh sync    # 首次 60~80G
+./build-a17.sh build   # lunch lineage_cannon cp2a userdebug; m bacon
+```
+
+几个坑：
+
+- 不要用裸 `./build.sh` 跑 A17：它不会设置 A17 profile，会装错 manifest；A17 一律用 `build-a17.sh`
+- `OUT_DIR` 在源码树外时，build 会自动建 `$ROM_DIR/out` 软链（siso 要求相对路径）
+- `vendor/lineage-priv/keys` 是 top-android 私有仓，local manifest 里已改成 https（不依赖 SSH key），
+  需要先 `gh auth setup-git`；没有凭据也能编，但会退回 testkey（`ro.build.tags=test-keys`）
+- 换变体给独立 `OUT_DIR`，否则触发 installclean 冲掉已有产物
+
 ## 命令
 
 ```bash

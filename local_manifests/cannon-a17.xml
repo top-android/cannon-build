@@ -17,7 +17,6 @@
 -->
 <manifest>
     <remote name="devs" fetch="https://github.com" />
-    <remote name="top-ssh" fetch="ssh://git@github.com/top-android" />
 
     <!-- ============ 1) 已 fork 到 top-android 的 AOSP/LineageOS 项目 ============ -->
     <remove-project name="LineageOS/android_art" />
@@ -93,5 +92,7 @@
     <!-- kernel / hardware-mediatek / wlan / Wifi / sepolicy_vndr 已由 pinned 清单钉在
          对应 fork 的 SHA 上（工作树干净），这里不重复定义，避免 duplicate path。 -->
 
-    <!-- ============ 3) 私有签名/AVB key 由 pinned 清单定义（top-ssh + 固定 SHA），此处不重复 -->
+    <!-- ============ 3) 私有签名/AVB key：不走 SSH（新环境通常无 key），改 https + gh 凭据 ============ -->
+    <remove-project name="android_vendor_lineage-priv_keys" />
+    <project path="vendor/lineage-priv/keys" name="top-android/android_vendor_lineage-priv_keys" remote="devs" revision="main" />
 </manifest>

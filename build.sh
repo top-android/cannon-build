@@ -190,6 +190,22 @@ cmd_init_pinned() {
     step "切换到锁定清单 $name"
     mkdir -p .repo/manifests
     cp "$pm" ".repo/manifests/$name"
+
+    # 私有签名 keys 仓默认走 https（local manifest 覆盖了 pinned 的 top-ssh），
+    # 需要 gh 的 credential helper；没有 keys 也能编，只是退回 testkey。
+    if [ ! -e "$ROM_DIR/vendor/lineage-priv/keys/keys.mk" ] && ! command -v gh >/dev/null 2>&1; then
+        c_ylw "未装 gh：keys 私有仓 https 拉取可能认证失败（或配 SSH key / 接受 testkey）"
+    fi
+
+    # 新环境的关键一步：pinned 清单里 23 个 fork 仓仍是上游 SHA，必须靠 local manifest
+    # 覆盖到 top-android:cannon-a17。缺了它 sync 出来就是裸上游，且 A17 已关闭 apply，
+    # 编出的包会缺全部修复。
+    step "安装 local_manifests/$LOCAL_MANIFEST_NAME（全 fork 单轨）"
+    mkdir -p .repo/local_manifests
+    [ -f "$SRC_DIR/local_manifests/$LOCAL_MANIFEST_NAME" ] || die "缺 local_manifests/$LOCAL_MANIFEST_NAME"
+    cp "$SRC_DIR/local_manifests/$LOCAL_MANIFEST_NAME" ".repo/local_manifests/$LOCAL_MANIFEST_NAME"
+    c_grn "已写入 .repo/local_manifests/$LOCAL_MANIFEST_NAME（23 仓指向 top-android cannon-a17）"
+
     if [ -d .repo/local_manifests ]; then
         # 全 fork 单轨（2026-11-11 起）：cannon-a17.xml 必须保留——它把 26 个 project 指到
         # top-android 各仓的 cannon-a17 分支，pinned manifest 里这些 project 仍是上游 SHA；
@@ -207,7 +223,7 @@ cmd_init_pinned() {
         if [ "$kept" = 1 ]; then
             c_grn "已保留 .repo/local_manifests 中的 cannon-a17.xml（全 fork 单轨）"
         else
-            c_ylw "未找到 cannon-a17.xml —— fork 单轨不会生效，需先 ./build.sh init 安装"
+            c_ylw "cannon-a17.xml 未就位 —— fork 单轨不会生效"
         fi
         c_ylw "其余 local manifest 已移到 $bak（锁定清单已含自有仓，避免重复 project）"
     fi
