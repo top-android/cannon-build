@@ -45,11 +45,30 @@ index 8f79bd4..03e9617 100644
  
      if (provider_factory == nullptr) {
        log::error("can't get capability from unknown factory");
+diff --git a/system/gd/hal/hci_backend_aidl.cc b/system/gd/hal/hci_backend_aidl.cc
+index 26a3e14..d56098b 100644
+--- a/system/gd/hal/hci_backend_aidl.cc
++++ b/system/gd/hal/hci_backend_aidl.cc
+@@ -40,7 +40,13 @@ public:
+ 
+   using AidlStatus = ::aidl::android::hardware::bluetooth::Status;
+   ::ndk::ScopedAStatus initializationComplete(AidlStatus status) override {
+-    log::assert_that(status == AidlStatus::SUCCESS, "status == AidlStatus::SUCCESS");
++    // [cannon] MTK 原厂 HAL 在 A17 上会返回非 SUCCESS 的 vendor 状态。原逻辑直接
++    // assert abort，导致 bluetooth 反复重启（表现为耳机连上后断联）。
++    // 降级为错误日志并继续回调，让上层走失败分支，不再杀掉整个进程。
++    if (status != AidlStatus::SUCCESS) {
++      log::error("cannon: AIDL HCI initializationComplete status={} (expected SUCCESS), continue",
++                 static_cast<int>(status));
++    }
+     callbacks_->initializationComplete();
+     return ::ndk::ScopedAStatus::ok();
+   }
 diff --git a/system/gd/hci/hci_layer.cc b/system/gd/hci/hci_layer.cc
-index fd85769..f2cacd0 100644
+index fd85769..75250e7 100644
 --- a/system/gd/hci/hci_layer.cc
 +++ b/system/gd/hci/hci_layer.cc
-@@ -280,10 +280,30 @@ struct HciLayer::impl {
+@@ -280,10 +280,41 @@ struct HciLayer::impl {
                         "assert failed: command_complete_view.IsValid()");
        (*command_queue_.front().GetCallback<CommandCompleteView>())(command_complete_view);
      } else if (waiting_for != WaitingFor::STATUS_OR_COMPLETE) {
@@ -61,11 +80,22 @@ index fd85769..f2cacd0 100644
 +      // 移植 A14 修法到 A15 结构：造一个**合法**的 error Command Complete（真实 opcode + 真实
 +      // 状态）交给 COMPLETE 回调，让 legacy 层走正常失败分支，而非进程 abort。
 +      if (is_status && waiting_for == WaitingFor::COMPLETE) {
++        // PDL view 的 was_validated_ 必须显式调用 IsValid() 才置位；A17 生成代码里
++        // 直接 GetStatus() 会 assert 并 abort（hci_packets.h:3037 GetStatus: was_validated_），
++        // 表现为蓝牙静默掉线/重连。这里先校验，再降级到 UNSPECIFIED_ERROR。
++        uint8_t status_byte = 0x1f;  // UNSPECIFIED_ERROR：取不到真实状态时的降级值
++        uint8_t num_packets = 1;
++        if (status_view.IsValid()) {
++          status_byte = static_cast<uint8_t>(status_view.GetStatus());
++          num_packets = status_view.GetNumHciCommandPackets();
++        } else {
++          log::warn("cannon: invalid CommandStatus for {}, fallback UNSPECIFIED_ERROR",
++                    OpCodeText(op_code));
++        }
 +        auto payload = std::make_unique<packet::RawBuilder>();
-+        payload->AddOctets1(static_cast<uint8_t>(status_view.GetStatus()));
++        payload->AddOctets1(status_byte);
 +        auto complete_event_builder = CommandCompleteBuilder::Create(
-+                status_view.GetNumHciCommandPackets(), status_view.GetCommandOpCode(),
-+                std::move(payload));
++                num_packets, op_code, std::move(payload));
 +        auto complete = std::make_shared<std::vector<std::uint8_t>>(
 +                complete_event_builder->SerializeToBytes());
 +        CommandCompleteView command_complete_view = CommandCompleteView::Create(

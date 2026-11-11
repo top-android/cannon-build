@@ -30,6 +30,13 @@ if [ "$(git rev-parse HEAD)" = "$REV" ]; then
     exit 0
 fi
 
+# fork 方案（2026-11-11 起）：修复已 commit 到 top-android:cannon-a17，HEAD 在 d468719 之上。
+# 此时绝不能 checkout 回 d468719，否则 fork 的提交会被丢弃，又变回「全量包缺修复」。
+if git merge-base --is-ancestor "$REV" HEAD 2>/dev/null; then
+    echo "[connectivity-pin] = HEAD $(git rev-parse --short HEAD) 已包含 d468719（fork 分支），跳过 pin"
+    exit 0
+fi
+
 # 有本地改动时不要动，避免覆盖别人的工作
 if [ -n "$(git status --porcelain)" ]; then
     echo "[connectivity-pin] ⚠ 工作区有未提交改动，跳过（请先清理/提交）"

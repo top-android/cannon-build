@@ -78,8 +78,8 @@ apply_a16_profile() {
 
 # ---- A17 profile（LineageOS 24.0 / Android 17）----
 # 目标：lunch lineage_cannon <release> userdebug（调试变体，默认），local_manifests 用 cannon-a17.xml
-#       （5 自有仓 lineage-24.0-cannon 双轨 + 上游 lineage-24.0 + build-time 补丁），
-#       编译前重放 A17 构建期补丁（apply_a17，幂等；基线阶段无补丁则自动跳过）。
+#       （全 fork 单轨，2026-11-11 起：所有修复已 commit 到 top-android 各仓的 cannon-a17 分支，
+#         repo sync 后代码自带修复，不再 build-time apply。repro/patches/a17 只作归档。）
 # A17 的 lunch release 代号 = cp2a（2026-11-05 实测：本树 vendor/lineage/release/
 # release_config_map.mk 只声明了 cp2a；A16 是 bp4a）。可用 CANNON_RELEASE=<code> 覆盖。
 apply_a17_profile() {
@@ -89,7 +89,7 @@ apply_a17_profile() {
     LUNCH_TARGET="lineage_cannon-${release}-${variant}"   # 仅用于显示/兼容旧逻辑
     LUNCH_ARGS=(lineage_cannon "$release" "$variant")     # A17 三参：product release variant
     LOCAL_MANIFEST_NAME="cannon-a17.xml"
-    APPLY_PATCHES="1"
+    APPLY_PATCHES="0"
     APPLY_SCRIPT="$SRC_DIR/scripts/apply_a17_cannon_patches.sh"
     PATCH_SUBDIR="a17"
 }
@@ -191,9 +191,25 @@ cmd_init_pinned() {
     mkdir -p .repo/manifests
     cp "$pm" ".repo/manifests/$name"
     if [ -d .repo/local_manifests ]; then
+        # 全 fork 单轨（2026-11-11 起）：cannon-a17.xml 必须保留——它把 26 个 project 指到
+        # top-android 各仓的 cannon-a17 分支，pinned manifest 里这些 project 仍是上游 SHA；
+        # 其余旧 local manifest 移到备份目录，避免同一 path 重复定义。
         local bak=".repo/local_manifests.bak.$(date +%Y%m%d%H%M%S)"
-        mv .repo/local_manifests "$bak"
-        c_ylw "已把 .repo/local_manifests 移到 $bak（锁定清单已含自有仓，避免重复 project）"
+        mkdir -p "$bak"
+        local kept=0
+        for f in .repo/local_manifests/*; do
+            [ -e "$f" ] || continue
+            case "$(basename "$f")" in
+                cannon-a17.xml|cannon.xml) kept=1; continue ;;
+            esac
+            mv "$f" "$bak"/
+        done
+        if [ "$kept" = 1 ]; then
+            c_grn "已保留 .repo/local_manifests 中的 cannon-a17.xml（全 fork 单轨）"
+        else
+            c_ylw "未找到 cannon-a17.xml —— fork 单轨不会生效，需先 ./build.sh init 安装"
+        fi
+        c_ylw "其余 local manifest 已移到 $bak（锁定清单已含自有仓，避免重复 project）"
     fi
     $(repo_bin) init -m "$name"
     c_grn "已切到锁定清单: $name（全 SHA，不再跟分支）"
@@ -201,9 +217,17 @@ cmd_init_pinned() {
 
 cmd_sync() {
     [ -d "$ROM_DIR/.repo" ] || die "$ROM_DIR 不是 repo 工作区，先跑 ./build.sh init"
+    # 硬门槛：repo sync 带 --force-remove-dirty，未提交且未归档进补丁的改动会被抹掉。
+    # 历史上 Connectivity 漏归档 7 个文件（BpfUtils.h 等），导致每次全量包都卡开机动画。
+    if [ "${CANNON_SKIP_PATCH_CHECK:-0}" != "1" ] && [ "${APPLY_PATCHES:-1}" = "1" ]; then
+        step "sync 前补丁覆盖自检（漏归档改动会被 --force-remove-dirty 抹掉）"
+        CANNON_PATCH_SUBDIR="${PATCH_SUBDIR:-a17}" \
+            bash "$SRC_DIR/scripts/check_patch_coverage.sh" "$ROM_DIR" \
+            || die "补丁覆盖自检未通过：先把上面 [阻断] 的改动导出进 repro/patches/${PATCH_SUBDIR:-a17}；确认要跳过设 CANNON_SKIP_PATCH_CHECK=1"
+    fi
     step "repo sync（首次约 60-80G）"
     cd "$ROM_DIR"
-    $(repo_bin) sync -c --force-sync --force-remove-dirty --no-tags \
+    $(repo_bin) sync -d -c --force-sync --force-remove-dirty --no-tags \
         --no-clone-bundle -j"$(nproc)" --optimized-fetch --prune
 
     if [ -f vendor/lineage-priv/keys/keys.mk ]; then

@@ -82,6 +82,43 @@ MAP=(
   # "packages_modules_Wifi.patch:packages/modules/Wifi"
 )
 
+# 未登记补丁检测：历史上 packages_modules_Connectivity_loader.patch 存在却没登记，
+# apply 时被静默忽略，导致 4.14 BPF 降级补丁丢失、全量包卡开机动画。
+# ARCHIVE_ONLY 为“已 commit 进 fork / 仅归档”的补丁，不参与 apply，也不报错。
+ARCHIVE_ONLY=(
+  device_xiaomi_cannon.patch
+  vendor_xiaomi_cannon.patch
+  kernel_xiaomi_cannon.patch
+  hardware_mediatek.patch
+  hardware_mediatek_wlan.patch
+  packages_modules_Wifi.patch
+  external_chromium-webview_prebuilt_x86_64.patch
+)
+unregistered=()
+for _pf in "$PATCHDIR"/*.patch; do
+  _base="$(basename "$_pf")"
+  _found=0
+  for _entry in "${MAP[@]}"; do
+    [ "${_entry%%:*}" = "$_base" ] && { _found=1; break; }
+  done
+  [ "$_found" = "1" ] && continue
+  _skip=0
+  for _a in "${ARCHIVE_ONLY[@]}"; do
+    [ "$_a" = "$_base" ] && { _skip=1; break; }
+  done
+  [ "$_skip" = "1" ] && continue
+  unregistered+=("$_base")
+done
+if [ "${#unregistered[@]}" -gt 0 ]; then
+  echo "!! 以下补丁未登记在 MAP，apply 时会被静默忽略："
+  printf '    - %s\n' "${unregistered[@]}"
+  if [ "${CANNON_ALLOW_UNREGISTERED_PATCH:-0}" != "1" ]; then
+    echo "RESULT: FAIL（登记到 MAP，或移到 _archived/，或用 CANNON_ALLOW_UNREGISTERED_PATCH=1 放行）"
+    exit 1
+  fi
+  echo "   （CANNON_ALLOW_UNREGISTERED_PATCH=1，已放行）"
+fi
+
 APPLIED=0; SKIPPED=0; DRIFT=0; BINARY=0; FAIL=0
 DRIFT_LIST=""
 

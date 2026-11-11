@@ -4,7 +4,7 @@
 
 ```bash
 cd /cannon/cannon-build
-./build-a17.sh all             # 锁定清单 init + sync + apply 补丁 + build
+./build-a17.sh all             # 锁定清单 init + sync + build（A17 不再 apply 补丁）
 ./build-a17.sh build           # 树已就绪，只编
 ./build-a17.sh module vendorimage
 ./build-a17.sh --help          # 完整用法（子命令 / 变体 / 环境变量 / 例子）
@@ -87,10 +87,36 @@ include device/lineage/sepolicy/libion/sepolicy.mk
 
 验证：`grep -c 'hal_graphics_allocator ion_device' /system_ext/etc/selinux/system_ext_sepolicy.cil` 应为 1。
 
-### 3. packages/modules/Connectivity 固定在 d468719
+### 3. 全部修复仓走 top-android fork 单轨（2026-11-11 起）
 
-A17 的 BPF（netd/offload 程序、ringbuf）需要 cannong 的组件集成提交 `d468719`。
-`build.sh apply` 会调 `scripts/pin_a17_connectivity.sh` 自动固定。
+A17 的修复不再靠「sync 后打补丁」，而是 commit 到 GitHub 组织 `top-android` 各仓的
+`cannon-a17` 分支，由唯一的 `.repo/local_manifests/cannon-a17.xml` 指过去（23 个 project），
+`APPLY_PATCHES=0`，`repro/patches/a17/` 只作归档、不再参与构建。
+
+| 分类 | project |
+|---|---|
+| AOSP / LineageOS 侧（18） | art、build/make、build/soong、frameworks/base、frameworks/native、frameworks/opt/telephony、hardware/lineage/compat、hardware/nxp/secure_element、hardware/xiaomi、packages/apps/{Jelly,Launcher3,Settings}、packages/modules/{NetworkStack,Bluetooth,Connectivity}、packages/providers/MediaProvider、system/{core,netd,sepolicy}、vendor/lineage |
+| 设备侧（5） | device/xiaomi/cannon、vendor/xiaomi/cannon、system/bpf |
+| 由 pinned 钉 SHA（不重复定义） | kernel/xiaomi/cannon、hardware/mediatek、hardware/mediatek/wlan、packages/modules/Wifi、device/mediatek/sepolicy_vndr、vendor/lineage-priv/keys |
+
+- 清单里统一用 `remove-project` + `top-android/*` + `revision="cannon-a17"` 覆盖 pinned 条目；
+  未列出的 1200+ project 仍按 pinned SHA checkout。
+- `cmd_init_pinned` 只保留 `cannon-a17.xml`（或安装后的 `cannon.xml`），不再有 `cannon-fork.xml`。
+- 首次切换（project `name` 从 `LineageOS/*` 变成 `top-android/*`）必须重建 `.git` 元数据，
+  执行一次（线程数跟随机器，不用写死 `-j8`）：
+
+```bash
+cd /cannon/rom
+src=(art build/make build/soong frameworks/base frameworks/native frameworks/opt/telephony \
+  hardware/lineage/compat hardware/nxp/secure_element hardware/xiaomi \
+  packages/apps/Jelly packages/apps/Launcher3 packages/apps/Settings \
+  packages/modules/{NetworkStack,Bluetooth,Connectivity} packages/providers/MediaProvider \
+  system/{core,netd,sepolicy} vendor/lineage device/xiaomi/cannon vendor/xiaomi/cannon system/bpf)
+PATH=/root/bin:$PATH repo sync --force-sync -j"$(nproc)" "${src[@]}"
+```
+
+之后普通 `repo sync` 即可，全部修复仓不再 apply 补丁。上游更新时在各 fork 的
+`cannon-a17` 上 `git rebase LineageOS/lineage-24.0`，再重新导出 pinned 清单基线 SHA。
 
 ## 内核
 
@@ -124,7 +150,7 @@ BpfHandler / NetdUpdatable / ClatCoordinator 失败不 abort。
 
 ```bash
 cd /cannon/cannon-build
-./build-a17.sh all          # init（锁定清单）+ sync + apply 补丁 + build
+./build-a17.sh all          # init（锁定清单）+ sync + build（无 apply 阶段）
 # 或分步：init / sync / apply / build / module <target>
 ```
 
@@ -137,9 +163,9 @@ cd /cannon/cannon-build
 cd /cannon/rom
 repo init -u https://github.com/LineageOS/android.git -b lineage-24.0   # 先建 .repo
 cp /cannon/cannon-build/manifests/a17-pinned-2026-11-10.xml .repo/manifests/
-mv .repo/local_manifests .repo/local_manifests.bak    # 锁定清单已含自有仓，避免重复 project
+mkdir -p .repo/local_manifests && cp /cannon/cannon-build/local_manifests/cannon-fork.xml .repo/local_manifests/
 repo init -m a17-pinned-2026-11-10.xml
-repo sync -c -j8
+repo sync -c -j"$(nproc)"
 ```
 
 清单内容：**1241 个 project 全部 `revision=<40 位 SHA>`**，包括

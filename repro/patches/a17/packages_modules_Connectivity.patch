@@ -58,7 +58,7 @@ index 8ac118f..72e0a8e 100644
  const bool isAtLeast26Q3 = (api_level_full >= 3702);  // 37.0+
  const bool isAtLeast26Q4 = (api_level_full >= 3710);  // 37.1
 diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
-index 6fa4c7e..359e7fd 100644
+index 6fa4c7e..2c784c2 100644
 --- a/bpf/loader/NetBpfLoad.cpp
 +++ b/bpf/loader/NetBpfLoad.cpp
 @@ -160,7 +160,11 @@ class ElfObject {
@@ -180,7 +180,7 @@ index 6fa4c7e..359e7fd 100644
  
          mapFds.push_back(std::move(fd));
      }
-@@ -1413,6 +1457,35 @@ static bool loadObject(const char* const progPath, const bool useLibbpf = true)
+@@ -1413,6 +1457,44 @@ static bool loadObject(const char* const progPath, const bool useLibbpf = true)
      return true;
  }
  
@@ -207,6 +207,15 @@ index 6fa4c7e..359e7fd 100644
 +}
 +
 +static bool loadObjectOrPinMaps(const char* const progPath, const bool useLibbpf = true) {
++    // [cannon][A17·4.14] 4.14 内核满足不了 A17 的 verifier 要求，bpf_object__load() 必然失败。
++    // 每次失败前的逐个程序校验会把同步执行的 init（exec_start bpfloader）阻塞约 20s
++    // （实测 event.load-bpf-programs 10.09s → zygote-start 30.30s）。
++    // netd_shared/* map 是 system_server / NetworkStats 的硬依赖，而 map 创建是毫秒级，
++    // prog 在 4.14 上本来也加载不了，所以直接只建 map + pin，跳过 prog 加载。
++    if (!isAtLeastKernelVersion(4, 19)) {
++        ALOGW("[cannon] kernel < 4.19: maps-only pinning (skip prog load): %s", progPath);
++        return pinMapsOnly(progPath) == 0;
++    }
 +    if (loadObject(progPath, useLibbpf)) return true;
 +    ALOGW("[cannon] object load failed (%s), falling back to maps-only pinning", progPath);
 +    pinMapsOnly(progPath);
@@ -216,7 +225,7 @@ index 6fa4c7e..359e7fd 100644
  #define APEXROOT "/apex/com.android.tethering"
  #define BPFROOT APEXROOT "/etc/bpf/mainline/"
  
-@@ -1541,8 +1614,9 @@ static bool loadAllObjects() {
+@@ -1541,8 +1623,9 @@ static bool loadAllObjects() {
              {"getsockopt_prog", BPF_PROG_TYPE_CGROUP_SOCKOPT, BPF_CGROUP_GETSOCKOPT, true},
              {"setsockopt_prog", BPF_PROG_TYPE_CGROUP_SOCKOPT, BPF_CGROUP_SETSOCKOPT, true},
          };
@@ -227,12 +236,16 @@ index 6fa4c7e..359e7fd 100644
                 loadBackportObject(BPFROOT "clatd.o", true, clatPrograms) &&
                 loadBackportObject(BPFROOT "dscpPolicy.o", true, dscpPrograms) &&
                 loadBackportObject(BPFROOT "netd.o", true, netdPrograms);
-@@ -1553,16 +1627,21 @@ static bool loadAllObjects() {
+@@ -1552,17 +1635,24 @@ static bool loadAllObjects() {
+     // b/494690861: funcs may trigger Real-time Kernel Protection (RKP)
      bool funcs = isAtLeast26Q2 && isAtLeastKernelVersion(6, 6, 118);
  
-     if (!loadObject(BPFROOT "offload.o", /*libbpf*/false)) return false;
+-    if (!loadObject(BPFROOT "offload.o", /*libbpf*/false)) return false;
 -    if (!loadObject(BPFROOT "test.o")) return false;
 -    if (!loadObject(BPFROOT "clatd.o")) return false;
++    // [cannon][A17·4.14] offload.o 在 4.14 上同样加载不了 prog；走 maps-only 快路径，
++    // 既省掉 verifier 时间，也避免这里的 if 短路让后面的 clatd/dscpPolicy/netd 轮不到。
++    if (!loadObjectOrPinMaps(BPFROOT "offload.o", /*libbpf*/false)) return false;
 +    // [cannon][A17·4.14] 同 backport 路径：test.o 跨 object 复用其它 object 已 pin 的
 +    // 共享 map，libbpf 不支持（返回 1），在 4.14 上必然失败并拖死整个加载序列，
 +    // 后面的 clatd/dscpPolicy/netd 都轮不到。它只是自测程序，跳过。
@@ -256,7 +269,7 @@ index 6fa4c7e..359e7fd 100644
  }
  
  static bool createDir(const char* const dir) {
-@@ -1776,23 +1855,21 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1776,23 +1866,21 @@ static int doLoad(char** argv, char * const envp[]) {
  
      // V bumps the kernel requirement up to 4.19
      // see also: //system/netd/tests/kernel_test.cpp TestKernel419
@@ -284,7 +297,7 @@ index 6fa4c7e..359e7fd 100644
      }
  
      // 26Q4 bumps the kernel requirement up to 5.15
-@@ -1999,14 +2076,15 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -1999,14 +2087,15 @@ static int doLoad(char** argv, char * const envp[]) {
          errno = 0;
          uint32_t progId = bpfGetNextProgId(0);  // expect 0 with errno == ENOENT
          if (progId || errno != ENOENT) {
@@ -304,7 +317,7 @@ index 6fa4c7e..359e7fd 100644
          }
      } else if (isAtLeastKernelVersion(4, 14)) {  // implies S through U QPR2
          // bpfGetNext{Prog,Map}Id require 4.14+
-@@ -2052,16 +2130,26 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -2052,16 +2141,26 @@ static int doLoad(char** argv, char * const envp[]) {
          ALOGE("If this triggers randomly, you might be hitting some memory allocation "
                "problems or startup script race.");
          ALOGE("--- DO NOT EXPECT SYSTEM TO BOOT SUCCESSFULLY ---");
@@ -334,7 +347,7 @@ index 6fa4c7e..359e7fd 100644
              ALOGE("Failed to write object load time to kernel stats map, err: [%d, %s]",
                    errno, strerror(errno));
              return 39;
-@@ -2069,7 +2157,8 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -2069,7 +2168,8 @@ static int doLoad(char** argv, char * const envp[]) {
  
          uint32_t value = 123;
          key = BPF_KERNEL_STATS_MAP_KEY_UBSAN_BUG;
@@ -344,7 +357,7 @@ index 6fa4c7e..359e7fd 100644
              ALOGE("Critical kernel bug - failure to write into index 1 of 2 element bpf map array."
                    "[%d, %s]", errno, strerror(errno));
              if (isAtLeastT) return 40;
-@@ -2111,6 +2200,10 @@ static int doLoad(char** argv, char * const envp[]) {
+@@ -2111,6 +2211,10 @@ static int doLoad(char** argv, char * const envp[]) {
  
  int main(int argc, char** argv, char * const envp[]) {
      if (android::bpf::isAtLeastT) {

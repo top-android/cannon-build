@@ -1,5 +1,5 @@
 diff --git a/loader/Loader.cpp b/loader/Loader.cpp
-index 08c6b6d..ed1ae87 100644
+index 08c6b6d..27c2f86 100644
 --- a/loader/Loader.cpp
 +++ b/loader/Loader.cpp
 @@ -313,7 +313,16 @@ static bool createMaps(const char* elfPath, ifstream& elfFile, vector<unique_fd>
@@ -20,11 +20,57 @@ index 08c6b6d..ed1ae87 100644
  
          if (kernelVer < md[i].min_kver) {
              ALOGD("skipping map %s which requires kernel version 0x%x >= 0x%x",
+@@ -602,8 +611,15 @@ void vendorBpfLoader() {
+         ALOGE("If this triggers randomly, you might be hitting some memory allocation "
+               "problems or startup script race.");
+         ALOGE("--- DO NOT EXPECT SYSTEM TO BOOT SUCCESSFULLY ---");
+-        sleep(20);
+-        exit(121);
++        // [cannon][A17·4.14] 4.14 上 /vendor/etc/bpf/*.o 必然加载失败，上游这里会
++        // sleep(20) 再 exit(121)。实测 ro.boottime.bpfloader→netd1shot 恰好差 20.1s，
++        // 且改加载循环毫无影响，就是这个 sleep 造成的。
++        // 4.14 降级为不等待，继续 execve "netbpfload done"，让 init 立即往下走。
++        if (android::bpf::isAtLeastKernelVersion(4, 19)) {
++            sleep(20);
++            exit(121);
++        }
++        ALOGW("[cannon] vendor BPF load failed on 4.14, skip sleep(20) and continue done");
+     }
+ 
+     const char* args[] = {"/apex/com.android.tethering/bin/netbpfload", "done", NULL};
 diff --git a/loader/bpfloader.rs b/loader/bpfloader.rs
-index f23d882..ee0ab8c 100644
+index f23d882..b0d9514 100644
 --- a/loader/bpfloader.rs
 +++ b/loader/bpfloader.rs
-@@ -730,10 +730,29 @@ fn load_libbpf_progs() {
+@@ -558,7 +558,7 @@ fn is_user_build() -> Result<bool, anyhow::Error> {
+     }
+ }
+ 
+-fn libbpf_worker(file_desc: &BpfFileDesc) -> Result<(), anyhow::Error> {
++fn libbpf_worker(file_desc: &BpfFileDesc, skip_progs: bool) -> Result<(), anyhow::Error> {
+     info!("Loading {}", file_desc.filename);
+     if file_desc.skip_on_user && is_user_build()? {
+         info!("Skip loading {} on user build", file_desc.filename);
+@@ -583,6 +583,18 @@ fn libbpf_worker(file_desc: &BpfFileDesc) -> Result<(), anyhow::Error> {
+     // section names are not recognized, so the program type must be set explicitly for them.
+     set_prog_types(&mut open_file)?;
+     set_skip_loading(&mut open_file, file_desc)?;
++    // [cannon][A17·4.14] degrade 模式：把该 object 的所有 prog 关掉 autoload，
++    // load() 只创建并 pin map。4.14 的 verifier 对 A17 的 prog 逐个失败重试，
++    // 这是开机第一屏 exec_start bpfloader 里 ~20s 的主要来源（prog 本来也起不来）。
++    if skip_progs {
++        warn!(
++            "[cannon] kernel 4.14: skip prog autoload for {}, pin maps only",
++            file_desc.filename
++        );
++        for mut prog in open_file.progs_mut() {
++            prog.set_autoload(false);
++        }
++    }
+     let mut loaded_file = open_file.load()?;
+ 
+     let bpffs_path = "/sys/fs/bpf/".to_owned() + file_desc.prefix;
+@@ -730,10 +742,29 @@ fn load_libbpf_progs() {
  
      let file_vec = get_file_vec();
  
@@ -43,8 +89,9 @@ index f23d882..ee0ab8c 100644
 +    }
 +
      for file_desc in file_vec {
-         if let Err(e) = libbpf_worker(&file_desc) {
+-        if let Err(e) = libbpf_worker(&file_desc) {
 -            if file_desc.critical {
++        if let Err(e) = libbpf_worker(&file_desc, degrade) {
 +            if file_desc.critical && !degrade {
                  panic!("Error when loading {0}: {e}", file_desc.filename);
 +            } else if file_desc.critical {
@@ -55,7 +102,7 @@ index f23d882..ee0ab8c 100644
              } else {
                  error!("Error when loading {0}: {e}", file_desc.filename);
              }
-@@ -742,12 +761,23 @@ fn load_libbpf_progs() {
+@@ -742,12 +773,23 @@ fn load_libbpf_progs() {
  }
  
  fn main() {
@@ -85,7 +132,7 @@ index f23d882..ee0ab8c 100644
      }
  
      // Redirect panic messages to both logcat and serial port
-@@ -761,9 +791,12 @@ fn main() {
+@@ -761,9 +803,12 @@ fn main() {
      load_libbpf_progs();
      info!("Loading legacy BPF progs");
  

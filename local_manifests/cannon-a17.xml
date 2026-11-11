@@ -1,79 +1,97 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  cannon A17 local_manifests（LineageOS 24.0 / Android 17，分支 lineage-24.0）
+  cannon A17 (LineageOS 24.0 / Android 17) 单一 local_manifest —— 全 fork 单轨
 
-  用法：build.sh 的 a17 profile 会把它安装为 <rom>/.repo/local_manifests/cannon.xml，
-        配合 `repo init -u LineageOS/android.git -b lineage-24.0`。
+  设计（2026-11-11 起）：
+    - 所有需要本地修复的 project 一律指向 top-android fork 的 cannon-a17 分支，
+      repo sync 出来的树即带全部修复，不再依赖 repro/patches/a17 的 build-time apply。
+    - 与锁定清单（manifests/a17-pinned-*.xml）配合使用：pinned 提供全 SHA 基线，
+      本文件用 remove-project + project 覆盖其中需要 fork 的条目；未列出的项目仍按
+      pinned 的 SHA checkout，保证可复现。
+    - 上游 LineageOS 前进时：在各 fork 的 cannon-a17 上 rebase，再重新导出 pinned 清单。
 
-  组织方式（沿用 A16 已验路线 + 6 仓双轨）：
-    - “我们自有、上游 LineageOS 没有 / 有真历史”的 6 个仓
-      （device/vendor/kernel/wlan/Wifi/hardware-mediatek）
-      各自带 lineage-24.0-cannon 分支（由 lineage-23.2-cannon 作为基线派生，见构建说明）；
-      repo sync 即得“干净 checkout = 该分支当前态”。
-      hardware/mediatek 例外：分支名仍是 lineage-24.0（从上游 lineage-24.0 派生，
-      top-android/android_hardware_mediatek），因为它是上游仓的 fork 而非全新仓。
-      同时在 repro/patches/a17/ 保留含二进制 patch 作为记录/可移植（apply_a17 幂等重放）。
-    - 其余 AOSP 侧改动一律走 LineageOS 上游 + build-time 补丁（scripts/apply_a17_cannon_patches.sh），
-      不为每仓建 fork。
-  前置：自有仓分支须已 push 到 top-android，否则 sync 会失败。
-  [待验证 2026-11-03] 上游 LineageOS/android.git 及各 section-2 仓已确认存在 lineage-24.0 分支。
+  remote 说明：
+    github  fetch=".."                 → https://github.com/<name>（pinned 清单同款）
+    devs    fetch="https://github.com" → https://github.com/<name>
+    top-ssh fetch="ssh://git@github.com/top-android" → 私有签名密钥仓
 -->
 <manifest>
     <remote name="devs" fetch="https://github.com" />
-    <!-- 私有仓（keys）走 SSH：无可匿名访问的 https 入口 -->
     <remote name="top-ssh" fetch="ssh://git@github.com/top-android" />
 
-    <!-- ===================== 1) 自有仓（6 个，A17 = lineage-24.0-cannon） ===================== -->
-    <project path="device/xiaomi/cannon"
-             name="top-android/android_device_xiaomi_cannon"
-             remote="devs" revision="lineage-24.0-cannon" />
+    <!-- ============ 1) 已 fork 到 top-android 的 AOSP/LineageOS 项目 ============ -->
+    <remove-project name="LineageOS/android_art" />
+    <project path="art" name="top-android/android_art" remote="github" revision="cannon-a17" />
 
-    <project path="vendor/xiaomi/cannon"
-             name="top-android/android_vendor_xiaomi_cannon"
-             remote="devs" revision="lineage-24.0-cannon" />
+    <remove-project name="LineageOS/android_build" />
+    <project path="build/make" name="top-android/android_build" remote="github" revision="cannon-a17" />
 
-    <!-- 内核 4.14.336（基线派生自 lineage-23.2-cannon） -->
-    <project path="kernel/xiaomi/cannon"
-             name="top-android/android_kernel_xiaomi_cannon"
-             remote="devs" revision="lineage-24.0-cannon" />
+    <remove-project name="LineageOS/android_build_soong" />
+    <project path="build/soong" name="top-android/android_build_soong" remote="github" revision="cannon-a17" />
 
-    <!-- hardware/mediatek 上游 fork（A17 温控/振动 HAL、停用撞名 java_library、
-         AIDL power HAL）。分支名沿用上游 lineage-24.0。 -->
-    <project path="hardware/mediatek"
-             name="top-android/android_hardware_mediatek"
-             remote="devs" revision="lineage-24.0" />
+    <remove-project name="LineageOS/android_frameworks_base" />
+    <project path="frameworks/base" name="top-android/android_frameworks_base" remote="github" revision="cannon-a17" />
 
-    <!-- 设备专有 WiFi HAL（上游 LineageOS 无独立仓，是 hardware/mediatek 子目录） -->
-    <project path="hardware/mediatek/wlan"
-             name="top-android/android_hardware_mediatek_wlan"
-             remote="devs" revision="lineage-24.0-cannon" />
+    <remove-project name="LineageOS/android_frameworks_native" />
+    <project path="frameworks/native" name="top-android/android_frameworks_native" remote="github" revision="cannon-a17" />
 
-    <!-- Wifi 框架 fork（老 vendor getFeatureSet/getWakeReason 空指针旁路等修复）
-         上游 lineage-24.0 主 manifest 已含 packages/modules/Wifi，须先 remove 再 override -->
-    <remove-project name="LineageOS/android_packages_modules_Wifi" />
-    <project path="packages/modules/Wifi"
-             name="top-android/android_packages_modules_Wifi"
-             remote="devs" revision="lineage-24.0-cannon" />
+    <remove-project name="LineageOS/android_frameworks_opt_telephony" />
+    <project path="frameworks/opt/telephony" name="top-android/android_frameworks_opt_telephony" remote="github" revision="cannon-a17" />
 
-    <!-- ===================== 2) 走上游 lineage-24.0，补丁 build-time apply ===================== -->
-    <project path="hardware/xiaomi"
-             name="LineageOS/android_hardware_xiaomi"
-             remote="devs" revision="lineage-24.0" />
+    <remove-project name="LineageOS/android_hardware_lineage_compat" />
+    <project path="hardware/lineage/compat" name="top-android/android_hardware_lineage_compat" remote="github" revision="cannon-a17" />
 
-    <project path="device/mediatek/sepolicy_vndr"
-             name="LineageOS/android_device_mediatek_sepolicy_vndr"
-             remote="devs" revision="lineage-24.0" />
+    <remove-project name="LineageOS/android_hardware_nxp_secure_element" />
+    <project path="hardware/nxp/secure_element" name="top-android/android_hardware_nxp_secure_element" remote="github" revision="cannon-a17" />
 
-    <!-- ===================== 3) 不在本清单的 AOSP 侧补丁项目 =====================
-         build/make, build/soong, art, frameworks/base, frameworks/native,
-         frameworks/opt/net/wifi, frameworks/opt/telephony, system/core, system/libhidl,
-         packages/modules/{Bluetooth,Connectivity,NetworkStack}, packages/providers/MediaProvider,
-         packages/apps/{Settings,Jelly,Launcher3}, hardware/lineage/compat, vendor/lineage
-         —— 来自 A17 主 manifest，不 override；由 apply_a17_cannon_patches.sh 在编译前打
-         （按症状签名重定位到 A17 源码，勿照抄 A16 行号）。 -->
+    <remove-project name="LineageOS/android_hardware_xiaomi" />
+    <project path="hardware/xiaomi" name="top-android/android_hardware_xiaomi" remote="devs" revision="cannon-a17" />
 
-    <!-- ===================== 4) 私有签名/AVB key（关键，勿删，仅存在于 rom，不入配置仓） ===================== -->
-    <project path="vendor/lineage-priv/keys"
-             name="android_vendor_lineage-priv_keys"
-             remote="top-ssh" revision="main" />
+    <remove-project name="LineageOS/android_packages_apps_Jelly" />
+    <project path="packages/apps/Jelly" name="top-android/android_packages_apps_Jelly" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_packages_apps_Launcher3" />
+    <project path="packages/apps/Launcher3" name="top-android/android_packages_apps_Launcher3" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_packages_apps_Settings" />
+    <project path="packages/apps/Settings" name="top-android/android_packages_apps_Settings" remote="github" revision="cannon-a17" />
+
+    <remove-project name="platform/packages/modules/NetworkStack" />
+    <project path="packages/modules/NetworkStack" name="top-android/android_packages_modules_NetworkStack" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_packages_providers_MediaProvider" />
+    <project path="packages/providers/MediaProvider" name="top-android/android_packages_providers_MediaProvider" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_system_core" />
+    <project path="system/core" name="top-android/android_system_core" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_system_netd" />
+    <project path="system/netd" name="top-android/android_system_netd" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_system_sepolicy" />
+    <project path="system/sepolicy" name="top-android/android_system_sepolicy" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_vendor_lineage" />
+    <project path="vendor/lineage" name="top-android/android_vendor_lineage" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_packages_modules_Bluetooth" />
+    <project path="packages/modules/Bluetooth" name="top-android/android_packages_modules_Bluetooth" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_packages_modules_Connectivity" />
+    <project path="packages/modules/Connectivity" name="top-android/android_packages_modules_Connectivity" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_system_bpf" />
+    <project path="system/bpf" name="top-android/android_system_bpf" remote="github" revision="cannon-a17" />
+
+    <!-- ============ 2) 设备/内核/厂商仓（自有，cannon-a17 或既有分支） ============ -->
+    <remove-project name="top-android/android_device_xiaomi_cannon" />
+    <project path="device/xiaomi/cannon" name="top-android/android_device_xiaomi_cannon" remote="devs" revision="cannon-a17" />
+
+    <remove-project name="top-android/android_vendor_xiaomi_cannon" />
+    <project path="vendor/xiaomi/cannon" name="top-android/android_vendor_xiaomi_cannon" remote="devs" revision="cannon-a17" />
+
+    <!-- kernel / hardware-mediatek / wlan / Wifi / sepolicy_vndr 已由 pinned 清单钉在
+         对应 fork 的 SHA 上（工作树干净），这里不重复定义，避免 duplicate path。 -->
+
+    <!-- ============ 3) 私有签名/AVB key 由 pinned 清单定义（top-ssh + 固定 SHA），此处不重复 -->
 </manifest>
