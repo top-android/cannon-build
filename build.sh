@@ -4,6 +4,8 @@
 #   ./build.sh doctor   环境体检
 #   ./build.sh init     repo init + 安装 local_manifests
 #   ./build.sh sync     repo sync
+#   ./build.sh check    校验各项目是否仍是浅克隆
+#   ./build.sh repair   删除退化项目的记录后单项目重拉
 #   ./build.sh apply    只重放构建期补丁（幂等）
 #   ./build.sh build    lunch + m bacon
 #   ./build.sh all      init + sync + apply 补丁 + build（A14 / LineageOS 21，默认）
@@ -242,15 +244,66 @@ cmd_sync() {
             || die "补丁覆盖自检未通过：先把上面 [阻断] 的改动导出进 repro/patches/${PATCH_SUBDIR:-a17}；确认要跳过设 CANNON_SKIP_PATCH_CHECK=1"
     fi
     step "repo sync（首次约 60-80G）"
+    cmd_check
     cd "$ROM_DIR"
-    $(repo_bin) sync -d -c --force-sync --force-remove-dirty --no-tags \
-        --no-clone-bundle -j"$(nproc)" --optimized-fetch --prune
+    if ! $(repo_bin) sync -d -c --fail-fast --force-sync --force-remove-dirty \
+        --no-tags --no-clone-bundle -j"$(nproc)" --optimized-fetch --prune; then
+        die "repo sync 失败；先运行 ./build.sh check，必要时 ./build.sh repair"
+    fi
+    cmd_check
 
     if [ -f vendor/lineage-priv/keys/keys.mk ]; then
         c_grn "签名密钥已同步"
     else
         c_ylw "vendor/lineage-priv/keys 没拉到（private 仓库，检查 ssh key 和 org 权限）"
     fi
+}
+
+# 浅克隆完整性校验：repo 的 fetch 被中断（early EOF）后，项目会丢失 `.git/shallow`，
+# 之后任何一次 sync 都会把它当成普通项目拉完整历史（prebuilts/sdk 从 1 个 commit /
+# 1.8G 涨到 20582 个 commit / 17.4G）。sync 前后各跑一次 check。
+cmd_check() {
+    cd "$ROM_DIR"
+    [ -d .repo ] || die "不是 repo 工作区：$ROM_DIR"
+    local total=0 missing=0
+    while IFS= read -r gitdir; do
+        total=$((total + 1))
+        if [ ! -f "$gitdir/shallow" ]; then
+            echo "MISSING: $gitdir"
+            missing=$((missing + 1))
+        fi
+    done < <(find .repo/projects -name '*.git' -type d)
+    echo "projects=$total missing=$missing"
+    if [ "$missing" -ne 0 ]; then
+        die "有项目退化成了完整历史：运行 ./build.sh repair"
+    fi
+}
+
+# 对退化的项目删掉三处记录（gitdir / project-objects / 工作树），再单项目重拉，
+# 让 repo 把它当成全新项目，从而重新遵守 --depth=1。
+cmd_repair() {
+    cd "$ROM_DIR"
+    [ -d .repo ] || die "不是 repo 工作区：$ROM_DIR"
+    local broken=()
+    while IFS= read -r gitdir; do
+        [ -f "$gitdir/shallow" ] || broken+=("$gitdir")
+    done < <(find .repo/projects -name '*.git' -type d)
+    [ "${#broken[@]}" -gt 0 ] || { c_grn "所有项目仍是浅克隆，无需修复"; return; }
+
+    for gitdir in "${broken[@]}"; do
+        local path="${gitdir#.repo/projects/}"
+        path="${path%.git}"
+        local name
+        name="$(git -C "$gitdir" config --get-regexp '^remote\..*\.projectname$' |
+            head -1 | awk '{print $2}')" || true
+        c_grn "修复 $path（${name:-unknown}）"
+        rm -rf "$gitdir"
+        [ -n "$name" ] && rm -rf ".repo/project-objects/$name.git"
+        rm -rf "$path"
+        $(repo_bin) sync -j1 --fail-fast -c --no-tags --no-clone-bundle "$path" ||
+            die "重拉失败：$path"
+    done
+    cmd_check
 }
 
 cmd_apply() {
@@ -399,6 +452,8 @@ case "${1:-}" in
     doctor) cmd_doctor ;;
     init)   cmd_init ;;
     sync)   cmd_sync ;;
+    check)  cmd_check ;;
+    repair) cmd_repair ;;
     apply)  cmd_apply ;;
     build)  cmd_build ;;
     module) shift; cmd_module "$@" ;;
@@ -407,5 +462,5 @@ case "${1:-}" in
     a15)    apply_a15_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a16)    apply_a16_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
     a17)    apply_a17_profile; cmd_init; cmd_sync; cmd_apply; cmd_build ;;
-    *)      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
+    *)      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
 esac

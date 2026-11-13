@@ -110,7 +110,9 @@ cd cannon-build
 | 命令 | 作用 |
 |---|---|
 | `./build.sh init` | `repo init` + 安装 `local_manifests/<profile>.xml`（分支模式） |
-| `./build.sh sync` | `repo sync` |
+| `./build.sh sync` | `repo sync`（浅克隆 `--depth=1`；失败会提示先 `check`） |
+| `./build.sh check` | 校验各项目是否仍是浅克隆，`missing` 必须为 0 |
+| `./build.sh repair` | 对退化成完整历史的项目删记录后单项目重拉，恢复浅克隆 |
 | `./build.sh apply` | 重放构建期补丁（A14–A16 使用；A17 已关闭） |
 | `./build.sh build` | `lunch` + `m bacon` |
 | `./build.sh module <target>` | 单模块编译，共用同一套环境与日志 |
