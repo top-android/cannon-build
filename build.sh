@@ -29,6 +29,9 @@ OUT_DIR="${OUT_DIR:-/cannon/out}"
 LOG="${LOG:-/cannon/build.log}"
 CCACHE_DIR="${CCACHE_DIR:-/cannon/ccache}"
 JOBS="${JOBS:-$(nproc)}"                # 默认取系统最大线程数；内存不足时用 JOBS=N 覆盖
+# 固定内核版本串里的 #N（scripts/mkcompile_h 在未设置时会读 .version 自增）。
+# 注意：固定后无法再用 #N 区分构建，只能看 uname 里的编译时间戳。
+export KBUILD_BUILD_VERSION="${KBUILD_BUILD_VERSION:-1}"
 LUNCH_TARGET="${LUNCH_TARGET:-lineage_cannon-ap2a-userdebug}"
 MANIFEST_URL="${MANIFEST_URL:-https://github.com/LineageOS/android.git}"
 MANIFEST_BRANCH="${MANIFEST_BRANCH:-lineage-21.0}"
@@ -114,6 +117,33 @@ repo_bin() {
     fi
 }
 
+# 宿主依赖：缺什么装什么。ccache 缺失会让 USE_CCACHE=1 静默失效（全量编译），
+# git-lfs 缺失会让 repo init --git-lfs 拉不到 LFS 文件，所以统一在 sync/init 前补齐，
+# 并把 ccache 缓存目录建好。
+ensure_host_deps() {
+    local pkgs=()
+    command -v git-lfs >/dev/null 2>&1 || pkgs+=(git-lfs)
+    command -v ccache  >/dev/null 2>&1 || pkgs+=(ccache)
+    if [ "${#pkgs[@]}" -gt 0 ]; then
+        step "安装缺失的宿主依赖: ${pkgs[*]}"
+        if [ "$(id -u)" = "0" ]; then
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${pkgs[@]}" >/dev/null 2>&1 \
+                && c_grn "已安装: ${pkgs[*]}" \
+                || c_ylw "安装失败: ${pkgs[*]}（继续执行，可能影响编译速度/完整性）"
+        else
+            c_ylw "非 root，跳过安装；请手动执行: sudo apt install -y ${pkgs[*]}"
+        fi
+    fi
+    mkdir -p "$CCACHE_DIR" 2>/dev/null || true
+    if [ -w "$CCACHE_DIR" ]; then
+        c_grn "ccache 目录就绪: $CCACHE_DIR"
+    else
+        c_ylw "ccache 目录 $CCACHE_DIR 不可写 —— 本次编译可能无缓存"
+    fi
+    return 0
+}
+
 cmd_doctor() {
     step "环境体检"
     local ok=1
@@ -147,6 +177,7 @@ cmd_doctor() {
 }
 
 cmd_init() {
+    ensure_host_deps
     if [ -n "${PINNED_MANIFEST:-}" ]; then
         cmd_init_pinned
         return 0
@@ -235,6 +266,8 @@ cmd_init_pinned() {
 
 cmd_sync() {
     [ -d "$ROM_DIR/.repo" ] || die "$ROM_DIR 不是 repo 工作区，先跑 ./build.sh init"
+    ensure_host_deps
+    check_googlesource_auth
     # 硬门槛：repo sync 带 --force-remove-dirty，未提交且未归档进补丁的改动会被抹掉。
     # 历史上 Connectivity 漏归档 7 个文件（BpfUtils.h 等），导致每次全量包都卡开机动画。
     if [ "${CANNON_SKIP_PATCH_CHECK:-0}" != "1" ] && [ "${APPLY_PATCHES:-1}" = "1" ]; then
@@ -243,13 +276,9 @@ cmd_sync() {
             bash "$SRC_DIR/scripts/check_patch_coverage.sh" "$ROM_DIR" \
             || die "补丁覆盖自检未通过：先把上面 [阻断] 的改动导出进 repro/patches/${PATCH_SUBDIR:-a17}；确认要跳过设 CANNON_SKIP_PATCH_CHECK=1"
     fi
-    step "repo sync（首次约 60-80G）"
+    step "repo sync（首次约 60-80G，浅克隆守卫开启）"
     cmd_check
-    cd "$ROM_DIR"
-    if ! $(repo_bin) sync -d -c --fail-fast --force-sync --force-remove-dirty \
-        --no-tags --no-clone-bundle -j"$(nproc)" --optimized-fetch --prune; then
-        die "repo sync 失败；先运行 ./build.sh check，必要时 ./build.sh repair"
-    fi
+    sync_with_guard
     cmd_check
 
     if [ -f vendor/lineage-priv/keys/keys.mk ]; then
@@ -257,6 +286,229 @@ cmd_sync() {
     else
         c_ylw "vendor/lineage-priv/keys 没拉到（private 仓库，检查 ssh key 和 org 权限）"
     fi
+}
+
+# googlesource 的 shared_anonymous 配额是短时按 IP 限流，匿名拉 AOSP 很容易 429；
+# 配了实名 cookie 就走账号配额。没有只提醒，不阻断。
+check_googlesource_auth() {
+    local cf
+    cf="$(git config --global --get http.cookiefile 2>/dev/null || true)"
+    if [ -n "$cf" ] && [ -f "$cf" ] && grep -q "android\.googlesource\.com" "$cf" 2>/dev/null; then
+        return 0
+    fi
+    c_ylw "================================================================"
+    c_ylw " 未配置 googlesource 实名 cookie —— 匿名配额很容易 429，sync 会反复中断"
+    c_ylw " 去 https://android.googlesource.com/new-password 复制脚本执行，或手动："
+    c_ylw "   git config --global http.cookiefile ~/.gitcookies"
+    c_ylw " 继续执行 sync（会慢，遇到 429 自动退避重试）"
+    c_ylw "================================================================"
+    return 0
+}
+
+# ---- 浅克隆守卫 ----
+# 退化机制：repo 对「已有 gitdir 但没有 .git/shallow」的项目会主动去掉 --depth
+# （project.py: not is_new and not _HasShallow() → depth=None），于是拉全量历史。
+# 中断（429/EOF/被 kill）恰好会留下这种状态，所以必须在两个时机拦：
+#   1) fetch 进行中：扫 /proc 里不带 --depth 的 git fetch；
+#   2) fetch 完成后：无 shallow 且 HEAD 可解析。
+_sync_find_degraded() {
+    local g settle="${1:-60}"
+    while IFS= read -r g; do
+        [ -f "$g/shallow" ] && continue
+        [ -d "$g" ] || continue
+        git --git-dir="$g" rev-parse -q --verify HEAD >/dev/null 2>&1 || continue
+        if [ "$settle" = 0 ] ||
+            [ -z "$(find "$g" -maxdepth 2 -newermt "-${settle} seconds" -print -quit 2>/dev/null)" ]; then
+            printf '%s\n' "$g"
+        fi
+    done < <(find "$ROM_DIR/.repo/projects" -name '*.git' -type d 2>/dev/null)
+}
+
+_sync_find_live_degraded() {
+    local p f t cmd pack
+    for p in /proc/[0-9]*; do
+        cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+        case "$cmd" in *"git fetch"*) ;; *) continue ;; esac
+        case "$cmd" in *"--depth"*) continue ;; esac
+        pack=""
+        for f in "$p"/fd/*; do
+            t=$(readlink "$f" 2>/dev/null) || continue
+            case "$t" in
+                "$ROM_DIR"/.repo/project-objects/*/objects/pack/tmp_pack*) pack="$t"; break ;;
+            esac
+        done
+        [ -n "$pack" ] || continue
+        printf '%s %s\n' "${p#/proc/}" "$pack"
+    done
+}
+
+_sync_kill_orphan_git() {
+    local p f t pid n=0
+    for p in /proc/[0-9]*; do
+        for f in "$p"/fd/*; do
+            t=$(readlink "$f" 2>/dev/null) || continue
+            case "$t" in
+                "$ROM_DIR"/*deleted*)
+                    pid=${p#/proc/}
+                    kill -9 "$pid" 2>/dev/null && n=$((n + 1))
+                    break ;;
+            esac
+        done
+    done
+    [ "$n" -gt 0 ] && c_ylw "清理孤儿 git 进程 $n 个（释放已删除的 tmp pack）"
+    return 0
+}
+
+_sync_cleanup_degraded() {
+    local g path name
+    while IFS= read -r g; do
+        [ -n "$g" ] || continue
+        path="${g#"$ROM_DIR"/.repo/projects/}"
+        path="${path%.git}"
+        name="$(git --git-dir="$g" config --get-regexp '^remote\..*\.projectname$' 2>/dev/null |
+            head -1 | awk '{print $2}')"
+        c_ylw "清理退化项目: $path (${name:-unknown})"
+        rm -rf "$g"
+        [ -n "$name" ] && rm -rf "$ROM_DIR/.repo/project-objects/$name.git"
+        rm -rf "$ROM_DIR/$path"
+    done
+}
+
+_sync_cleanup_partials() {
+    local g path name n=0
+    while IFS= read -r g; do
+        [ -f "$g/shallow" ] && continue
+        git --git-dir="$g" rev-parse -q --verify HEAD >/dev/null 2>&1 && continue
+        path="${g#"$ROM_DIR"/.repo/projects/}"
+        path="${path%.git}"
+        name="$(git --git-dir="$g" config --get-regexp '^remote\..*\.projectname$' 2>/dev/null |
+            head -1 | awk '{print $2}')"
+        rm -rf "$g"
+        [ -n "$name" ] && rm -rf "$ROM_DIR/.repo/project-objects/$name.git"
+        rm -rf "$ROM_DIR/$path"
+        n=$((n + 1))
+    done < <(find "$ROM_DIR/.repo/projects" -name '*.git' -type d 2>/dev/null)
+    [ "$n" -gt 0 ] && c_ylw "清理半截项目 $n 个（强制下次按 depth=1 重取）"
+    return 0
+}
+
+# 工作树和 index 不一致时（checkout 报 untracked/覆盖），直接把工作树删掉重检出；
+# gitdir 保留，repo 会重新 checkout，不用重下。
+_sync_fix_bad_worktrees() {
+    local since="$1" p n=0
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        [ -e "$ROM_DIR/$p" ] || continue
+        c_ylw "重置工作树: $p"
+        rm -rf "${ROM_DIR:?}/$p"
+        n=$((n + 1))
+    done < <(tail -c +"$since" "$LOG" 2>/dev/null | tr '\r' '\n' |
+        sed -n 's/^error: \(.*\)\/: .*checkout .*/\1/p' | sort -u)
+    [ "$n" -gt 0 ] && c_ylw "共重置 $n 个工作树"
+    return 0
+}
+
+# 伪 tty 跑一轮 repo sync，日志实时追加到 $LOG；监控退化，发现就整组杀掉重来。
+sync_with_guard() {
+    local args pid killed bad live hit log_off fails=0 wait_s
+    local -A repeat=()
+    local max_attempts="${SYNC_MAX_ATTEMPTS:-50}"
+    args="-d -c --force-sync --force-remove-dirty --no-tags --no-clone-bundle \
+-j${SYNC_JOBS:-$(nproc)} --retry-fetches=6 --optimized-fetch --prune"
+    mkdir -p "$(dirname "$LOG")"
+
+    local attempt=0
+    while [ "$attempt" -lt "$max_attempts" ]; do
+        attempt=$((attempt + 1))
+        printf '\n[guard] ======== sync 第 %d 次 %s ========\n' "$attempt" "$(date -Is)" >>"$LOG"
+        log_off=$(( $(stat -c%s "$LOG" 2>/dev/null || echo 0) + 1 ))
+
+        # 起 sync 前没有 fetch 在跑，此时无 shallow 的既有项目必然是退化项
+        bad="$(_sync_find_degraded 0)"
+        [ -n "$bad" ] && { c_ylw "sync 前清理已有退化项目"; printf '%s\n' "$bad" | _sync_cleanup_degraded; }
+        _sync_cleanup_partials
+
+        setsid script -qef -a -c "cd '$ROM_DIR' && exec $(repo_bin) sync $args" \
+            "$LOG" >/dev/null 2>&1 </dev/null &
+        pid=$!
+        killed=0
+
+        while kill -0 "$pid" 2>/dev/null; do
+            sleep "${SYNC_SCAN_INTERVAL:-10}"
+            kill -0 "$pid" 2>/dev/null || break
+
+            live="$(_sync_find_live_degraded)"
+            if [ -n "$live" ]; then
+                c_ylw "!! 发现正在进行的全量 fetch（无 --depth），立即中断"
+                printf '%s\n' "$live" | while IFS= read -r l; do c_ylw "   $l"; done
+                kill -TERM -- "-$pid" 2>/dev/null
+                sleep 5
+                kill -KILL -- "-$pid" 2>/dev/null
+                wait "$pid" 2>/dev/null || true
+                _sync_kill_orphan_git
+                _sync_cleanup_partials
+                killed=1
+                break
+            fi
+
+            bad="$(_sync_find_degraded)"
+            [ -n "$bad" ] || continue
+
+            hit=""
+            while IFS= read -r l; do
+                [ -n "$l" ] || continue
+                repeat[$l]=$(( ${repeat[$l]:-0} + 1 ))
+                if [ "${repeat[$l]}" -gt 3 ]; then
+                    c_ylw "跳过反复退化项目（第 ${repeat[$l]} 次）: ${l#"$ROM_DIR"/}"
+                    continue
+                fi
+                hit+="$l"$'\n'
+            done <<< "$bad"
+            if [ -z "${hit//[$'\n']/}" ]; then
+                c_ylw "本轮退化项目都是反复项，不 kill，等 sync 自己收尾"
+                continue
+            fi
+
+            c_ylw "!! 检测到全量克隆回退，立即中断 sync"
+            while IFS= read -r l; do
+                [ -n "$l" ] && c_ylw "   退化: ${l#"$ROM_DIR"/}"
+            done <<< "$hit"
+            kill -TERM -- "-$pid" 2>/dev/null
+            sleep 5
+            kill -KILL -- "-$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null || true
+            printf '%s' "$hit" | _sync_cleanup_degraded
+            _sync_kill_orphan_git
+            _sync_cleanup_partials
+            killed=1
+            break
+        done
+
+        if [ "$killed" = 1 ]; then
+            c_ylw "已清理，重新浅克隆（attempt $((attempt + 1))）"
+            continue
+        fi
+
+        local rc=0
+        wait "$pid" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            c_grn "sync 完成（attempt $attempt）"
+            return 0
+        fi
+
+        c_ylw "sync 退出码 $rc（429/网络等），清理后重试"
+        bad="$(_sync_find_degraded)"
+        [ -n "$bad" ] && printf '%s\n' "$bad" | _sync_cleanup_degraded
+        _sync_kill_orphan_git
+        _sync_cleanup_partials
+        _sync_fix_bad_worktrees "$log_off"
+        fails=$((fails + 1))
+        wait_s=$((60 * (1 << (fails - 1))))
+        [ "$wait_s" -gt 300 ] && wait_s=300
+        c_ylw "第 $fails 次失败，等待 ${wait_s}s 后重试"
+        sleep "$wait_s"
+    done
+    die "sync 连续失败 $max_attempts 次，放弃；看 $LOG"
 }
 
 # 浅克隆完整性校验：repo 的 fetch 被中断（early EOF）后，项目会丢失 `.git/shallow`，
