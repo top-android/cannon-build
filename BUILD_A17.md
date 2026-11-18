@@ -225,3 +225,22 @@ bash /cannon/cannon-build/scripts/check_a17_pinned.sh \
 > - `PROFILE=a17 ./build.sh init` → 分支模式（装 `local_manifests/cannon-a17.xml`，
 >   树随上游前进）。`build.sh build/module` 不重做 init，所以已经在锁定树上时
 >   继续 `./build-a17.sh build` 不会破坏锁定状态。
+
+## 2026-11-19 源码状态固化
+
+- 新清单：`manifests/a17-pinned-2026-11-19.xml`（`PINNED_MANIFEST=latest` 按 mtime 会选中它）
+- 6 个改动仓改指向 `top-android/*` 的 `lineage-24.0-cannon` 分支（并固定到当时的 commit）：
+  `device/xiaomi/cannon`、`kernel/xiaomi/cannon`、`frameworks/av`、
+  `frameworks/opt/telephony`、`hardware/lineage/interfaces`、`packages/apps/Aperture`
+- 其余 1191 个仓仍钉在 `a17-pinned-2026-11-10.xml` 的 SHA，未变
+- `apply_a17_cannon_patches.sh` 保持幂等：这 6 个仓里已经包含的补丁会被 `git apply --reverse --check` 判为“已应用”并跳过
+- 全新复现：
+
+```bash
+PINNED_MANIFEST=manifests/a17-pinned-2026-11-19.xml ./build-a17.sh init
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh sync
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh apply   # 幂等，已应用会跳过
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user JOBS=$(nproc) ./build-a17.sh build
+```
+
+> 说明：本版 ROM 的 codec2 固定 `media.c2.hal.selection=aidl`（软解）；MTK A10 的 HIDL store 在 A17 客户端下 `start()` 会死锁，已回退。
