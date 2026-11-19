@@ -1,32 +1,275 @@
-diff --git a/BoardConfig.mk b/BoardConfig.mk
-index 007ad0c..6efc89d 100644
---- a/BoardConfig.mk
-+++ b/BoardConfig.mk
-@@ -151,6 +151,10 @@ TARGET_FS_CONFIG_GEN += $(DEVICE_PATH)/configs/fs_config_vendor.fs
- 
- # Sepolicy
- include device/mediatek/sepolicy_vndr/SEPolicy.mk
-+# MT6853 只有 legacy ION，HAL 需要访问 /dev/ion（尤其 hal_graphics_allocator，否则 gralloc
-+# 分配 buffer 全部失败 → SurfaceFlinger abort 卡第一屏）。该目录提供
-+#   allow hal_graphics_allocator ion_device:chr_file r_file_perms;
-+include device/lineage/sepolicy/libion/sepolicy.mk
- BOARD_VENDOR_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy/vendor
- SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy/private
- 
+diff --git a/configs/vintf/manifest.xml b/configs/vintf/manifest.xml
+index ee15bca..4fe207b 100644
+--- a/configs/vintf/manifest.xml
++++ b/configs/vintf/manifest.xml
+@@ -70,6 +70,16 @@
+         <transport>hwbinder</transport>
+         <fqname>@1.2::IComponentStore/default</fqname>
+     </hal>
++    <!--
++        [cannon][A17] 同一个 HAL 的 AIDL 版本由 frameworks/av 的
++        android.hardware.media.c2-default-service 提供（把 MTK 的
++        libcodec2_mtk_c2store 桥接成 AIDL store，硬解组件才进 MediaCodecList）。
++        A17 framework 只查 AIDL store，media.c2.hal.selection=aidl。
++
++        这里不再重复声明：该 Soong 模块自带 VINTF 片段
++        （/vendor/etc/vintf/manifest/manifest_media_c2_default.xml），
++        两处同时声明会被 check_vintf 判成 Conflicting FqInstance。
++    -->
+     <hal format="hidl">
+         <name>android.hardware.radio</name>
+         <transport>hwbinder</transport>
 diff --git a/device.mk b/device.mk
-index 652d0b3..449a927 100644
+index d08e145..fd1ac00 100644
 --- a/device.mk
 +++ b/device.mk
-@@ -154,6 +154,12 @@ PRODUCT_PACKAGES += \
- #     disable_configstore
+@@ -526,6 +526,36 @@ PRODUCT_COPY_FILES += \
+     $(LOCAL_PATH)/configs/seccomp/mediaextractor.policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/mediaextractor.policy \
+     $(LOCAL_PATH)/configs/seccomp/mediaswcodec.policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/mediaswcodec.policy
  
- # Display
-+# [cannon][A17] MT6853 只有 legacy ION，内核没有 dma-heap（CONFIG_ION=y，无 CONFIG_DMABUF_HEAPS）。
-+# 不设这个 soong 变量时 libdmabufheap 编出来不带 /dev/ion 回退，vendor 的 gralloc4 分配必然失败
-+# （DMABUFHEAPS: Could not open DMA-BUF heap named: mtk_mm/system → allocate failed with 2），
-+# 表现为 SurfaceFlinger 拿到 0x0 buffer 后 abort、卡第一屏。
-+$(call soong_config_set_bool,libion,legacy_impl,true)
++# codec2 AIDL HAL（A17 framework 只认 AIDL IComponentStore；MTK 硬解 blob 通过
++# libcodec2_aidl 桥接成 /default，硬解组件才出现在 MediaCodecList 里）。
++#
++# 这里用预编译件而不是 Soong 模块，原因：
++#  1) libcodec2_vndk.so 是 A17 /system 变体，DT_NEEDED 已从 libdmabufheap.so 改成
++#     libdmabuf_a17.so；vendor 命名空间里 /vendor/lib64/libdmabufheap.so 是 A12 原厂
++#     版本，缺 A17 的 BufferAllocator 符号，直接链接会 dlopen 失败。
++#  2) 若让 Soong 从源码生成 /vendor 变体，会与上面的预编译件抢同一个安装路径，且
++#     NEEDED 又指回 A12 的 libdmabufheap。
++# libdmabuf_a17.so 是 A17 libdmabufheap 的改名副本（SONAME 同步改）。
++# 这些文件与已验证可用的 Magisk 模块 payload 字节一致。
++PRODUCT_COPY_FILES += \
++    $(LOCAL_PATH)/prebuilts/c2aidl/android.hardware.media.c2-default-service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.media.c2-default-service \
++    $(LOCAL_PATH)/prebuilts/c2aidl/android.hardware.media.c2-default-seccomp_policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/android.hardware.media.c2-default-seccomp_policy \
++    $(LOCAL_PATH)/prebuilts/c2aidl/libcodec2_aidl.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_aidl.so \
++    $(LOCAL_PATH)/prebuilts/c2aidl/libcodec2_vndk.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_vndk.so \
++    $(LOCAL_PATH)/prebuilts/c2aidl/libcodec2_hidl_plugin.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_hidl_plugin.so \
++    $(LOCAL_PATH)/prebuilts/c2aidl/libdmabuf_a17.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libdmabuf_a17.so \
++    $(LOCAL_PATH)/prebuilts/c2aidl/libstagefright_foundation.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libstagefright_foundation.so
 +
- # A16-D7: memtrack 源码 HAL 在 A16 更名为 android.hardware.memtrack-service.mediatek
- # （A15 为 -mali 后缀；A16 的 memtrack 源码已含 MemtrackDeviceMali.cpp，等价）。
++# 服务本体的 init rc 和 VINTF 片段由 frameworks/av 的 Soong 模块安装
++# （rc 已改成上面那套 LD_PRELOAD；二进制与 prebuilts 里的副本 md5 一致）。
++# 之前 rc/片段是手工单编该模块留下的 staging 残留，会多起一个服务，
++# 还会和 configs/vintf/manifest.xml 里的 AIDL 声明撞成 Conflicting FqInstance。
++PRODUCT_PACKAGES += \
++    android.hardware.media.c2-default-service \
++    libc2_bq_stub \
++    libshim_no_vintf \
++    libshim_dmabuf_alloc
++
+ 
+ # Sensors
  PRODUCT_PACKAGES += \
+diff --git a/libshims/Android.bp b/libshims/Android.bp
+index 11ced67..900c02f 100644
+--- a/libshims/Android.bp
++++ b/libshims/Android.bp
+@@ -140,6 +140,7 @@ cc_library_shared {
+     ],
+     shared_libs: [
+         "libbase",
++        "liblog",
+         "libui",
+         "libsync",
+         "libutils",
+@@ -167,3 +168,42 @@ cc_library_shared {
+     cflags: ["-Wno-reserved-identifier"],
+     ldflags: ["-Wl,-soname,libstagefright_bufferqueue_helper.so"],
+ }
++
++// 2026-11-19 硬解 AIDL：补 A17 libcodec2_vndk 需要的
++// BufferAllocator::Alloc(string, size_t, unsigned)（3 参数重载）。
++// 厂商 libdmabufheap.so 只有 4 参数版本；只把这个 shim 预加载进
++// codec2 AIDL 服务，避免替换全局 libdmabufheap 破坏 gralloc/SF。
++cc_library_shared {
++    name: "libshim_dmabuf_alloc",
++    srcs: [
++        "src/DmabufAllocShim.c",
++    ],
++    shared_libs: [
++        "libdl",
++    ],
++    vendor: true,
++    compile_multilib: "64",
++}
++
++// 以 mediacodec 域 + LD_PRELOAD 启动 codec2 AIDL 服务（Magisk 模块用）
++cc_binary {
++    name: "c2aidl_launch",
++    srcs: [
++        "src/C2AidlLaunch.c",
++    ],
++    shared_libs: [
++        "libselinux",
++    ],
++    vendor: true,
++    compile_multilib: "64",
++}
++
++// 吞掉 AIBinder_markVintfStability，让模块自带的 AIDL store 无需 VINTF 声明即可注册
++cc_library_shared {
++    name: "libshim_no_vintf",
++    srcs: [
++        "src/NoVintfShim.c",
++    ],
++    vendor: true,
++    compile_multilib: "64",
++}
+diff --git a/libshims/src/C2AidlLaunch.c b/libshims/src/C2AidlLaunch.c
+new file mode 100644
+index 0000000..7027487
+--- /dev/null
++++ b/libshims/src/C2AidlLaunch.c
+@@ -0,0 +1,79 @@
++/*
++ * [cannon][A17] 以 mediacodec 域启动 codec2 AIDL 服务。
++ *
++ * 为什么需要它：服务不是由 init 拉起的（Magisk 模块无法新增 init service，
++ * init 在 Magisk 挂载模块之前就解析完 rc 了），而是 service.sh 以 root 启动。
++ * 直接用 runcon 的话 LD_PRELOAD 会作用到 runcon 自己（system 二进制进不了
++ * vendor 命名空间）；用 shell 包一层又会因为 mediacodec 的
++ * neverallow execute_no_trans 失败。
++ *
++ * 这个 launcher 做四件事：设好 LD_PRELOAD → setexeccon(mediacodec) →
++ * 降到厂商 HAL 的 uid/gid → exec。
++ *
++ * 为什么要降 uid：/dev/video* 是 media:system 0660，而 mediacodec 域没有
++ * capability dac_override。以 root 跑（gid 0）照样 EACCES，MTK vdec 枚举
++ * 设备时打不开任何节点 → initVCodec failed → 硬解组件全部消失。
++ * 厂商 HIDL HAL（/vendor/etc/init/android.hardware.media.c2@1.2-mediatek.rc）
++ * 用的是 user mediacodec + 一串 group，这里照抄它的实际 uid/gid（取自
++ * /proc/<pid>/status）：uid 1046、gid 1006、补充组见 kGroups。
++ */
++#include <grp.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <unistd.h>
++#include <selinux/selinux.h>
++
++#define AID_MEDIA_CODEC 1046 /* mediacodec 用户 */
++#define AID_CAMERA 1006      /* 主组（init 取 group 列表第一个） */
++
++/* 与厂商 HAL 进程 /proc/<pid>/status 的 Groups 完全一致 */
++static const gid_t kGroups[] = {
++    1000, /* system */
++    1005, /* audio */
++    1013, /* media */
++    1015, /* sdcard_rw */
++    1023, /* media_rw */
++    1026, /* drmrpc */
++    1028, /* sdcard_r */
++    1031, /* mediadrm */
++    3001, /* net_bt_admin */
++    3002, /* net_bt */
++    3003, /* inet */
++    3007, /* net_bw_acct */
++};
++
++int main(int argc, char **argv) {
++    (void)argc;
++    /* 基础 preload；C2AIDL_EXTRA_PRELOAD 可追加一个（用于把打过补丁的
++     * libstagefright_foundation.so 只注入本进程，做单进程验证）。 */
++    const char *base =
++            "/vendor/lib64/libshim_no_vintf.so:"
++            "/vendor/lib64/libc2_bq_stub.so:"
++            "/vendor/lib64/libshim_gbm_only.so:"
++            "/vendor/lib64/libshim_dmabuf_alloc.so";
++    const char *extra = getenv("C2AIDL_EXTRA_PRELOAD");
++    if (extra != NULL && extra[0] != '\0') {
++        static char buf[1024];
++        snprintf(buf, sizeof(buf), "%s:%s", base, extra);
++        setenv("LD_PRELOAD", buf, 1);
++    } else {
++        setenv("LD_PRELOAD", base, 1);
++    }
++    /* 先设 exec 上下文：此时还在 magisk 域，有权限写 /proc/self/attr/exec */
++    if (setexeccon("u:r:mediacodec:s0") < 0) {
++        perror("setexeccon");
++    }
++    if (setgroups(sizeof(kGroups) / sizeof(kGroups[0]), kGroups) < 0) {
++        perror("setgroups");
++    }
++    if (setgid(AID_CAMERA) < 0) {
++        perror("setgid");
++    }
++    if (setuid(AID_MEDIA_CODEC) < 0) {
++        perror("setuid");
++    }
++    execv("/vendor/bin/hw/android.hardware.media.c2-default-service", argv);
++    perror("execv");
++    return 1;
++}
+diff --git a/libshims/src/DmabufAllocShim.c b/libshims/src/DmabufAllocShim.c
+new file mode 100644
+index 0000000..04b88ed
+--- /dev/null
++++ b/libshims/src/DmabufAllocShim.c
+@@ -0,0 +1,33 @@
++/*
++ * [cannon][A17] A17 的 libcodec2_vndk.so 引用
++ *   BufferAllocator::Alloc(const std::string&, size_t, unsigned int)
++ * 这是 A17 新增的 3 参数重载（内部等价于 4 参数版本 + alignment=0）。
++ * 厂商的 libdmabufheap.so 是 A12 的，只有 4 参数版本：
++ *   BufferAllocator::Alloc(const std::string&, size_t, unsigned int, size_t)
++ *
++ * 直接替换 /vendor/lib64/libdmabufheap.so 会破坏 MTK gralloc / surfaceflinger
++ * （实测 SkiaGLRenderEngine::create 空指针崩溃），所以这里只补这一个符号，
++ * 通过 LD_PRELOAD 只进入 codec2 AIDL 服务进程，转发到厂商的 4 参数实现。
++ */
++#include <dlfcn.h>
++#include <stddef.h>
++
++#define SYM_ALLOC3 \
++    "_ZN15BufferAllocator5AllocERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEEmj"
++#define SYM_ALLOC4 \
++    "_ZN15BufferAllocator5AllocERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEEmjm"
++
++typedef int (*alloc4_fn)(void *, const void *, size_t, unsigned int, size_t);
++
++extern int alloc3(void *, const void *, size_t, unsigned int) __asm__(SYM_ALLOC3);
++
++int alloc3(void *self, const void *name, size_t len, unsigned int flags) {
++    static alloc4_fn fn4;
++    if (fn4 == NULL) {
++        fn4 = (alloc4_fn)dlsym(RTLD_NEXT, SYM_ALLOC4);
++    }
++    if (fn4 == NULL) {
++        return -1;
++    }
++    return fn4(self, name, len, flags, 0);
++}
+diff --git a/libshims/src/GraphicBufferMapper.cpp b/libshims/src/GraphicBufferMapper.cpp
+index c98acf6..c8ea4b2 100644
+--- a/libshims/src/GraphicBufferMapper.cpp
++++ b/libshims/src/GraphicBufferMapper.cpp
+@@ -21,8 +21,7 @@ extern "C" {
+ // A12 的 32 位 codec2 HAL（libcodec2_vndk.so）调用 gralloc1 时代的 6 参数 lock：
+ //   lock(handle, usage, bounds, &vaddr, &bytesPerPixel, &bytesPerStride)
+ // A17 的 libui 已删除该符号。最初实现只回填了 vaddr，bytesPerPixel/bytesPerStride
+-// 保持未初始化 —— MTK 的 vdec 用它计算 buffer 布局，拿不到就一直卡到框架 3 秒超时
+-// （实测 start 卡 3.27s → UNKNOWN_ERROR，硬解永远失败，只能回退软解）。
++// 保持未初始化，MTK 的 vdec 用它们计算 buffer 布局。
+ // 这里用 gralloc4 的 getPlaneLayouts 回填 stride。
+ status_t _ZN7android19GraphicBufferMapper4lockEPK13native_handlejRKNS_4RectEPPvPiS9_(
+         void* thisptr, buffer_handle_t handle, uint32_t usage, const Rect& bounds, void** vaddr,
+diff --git a/libshims/src/NoVintfShim.c b/libshims/src/NoVintfShim.c
+new file mode 100644
+index 0000000..51fe0ca
+--- /dev/null
++++ b/libshims/src/NoVintfShim.c
+@@ -0,0 +1,14 @@
++/*
++ * [cannon][A17] 去掉 codec2 AIDL 服务的 VINTF 稳定性标记。
++ *
++ * 生成的 BnComponentStore 构造函数会调用 AIBinder_markVintfStability()，
++ * servicemanager 因此要求该服务必须出现在 /vendor/etc/vintf/manifest.xml 里
++ * 才允许注册。我们的 store 是 Magisk 模块带进来的，没法进 manifest
++ * （servicemanager 在 post-fs-data 之前就把 manifest 读完了），
++ * 所以这里把这个标记吞掉，注册就不再需要 VINTF 声明。
++ */
++struct AIBinder;
++
++void AIBinder_markVintfStability(struct AIBinder *binder) {
++    (void)binder;
++}

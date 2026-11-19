@@ -1,0 +1,145 @@
+diff --git a/media/codec2/hal/aidl/ComponentStore.cpp b/media/codec2/hal/aidl/ComponentStore.cpp
+index 5ae5c89b56..49c582f171 100644
+--- a/media/codec2/hal/aidl/ComponentStore.cpp
++++ b/media/codec2/hal/aidl/ComponentStore.cpp
+@@ -267,10 +267,8 @@ ScopedAStatus ComponentStore::createComponent(
+     }
+ 
+     std::shared_ptr<C2Component> c2component;
+-    ALOGD("[cannon] createComponent begin name=%s", name.c_str());
+     c2_status_t status =
+             mStore->createComponent(name, &c2component);
+-    ALOGD("[cannon] createComponent end name=%s status=%d", name.c_str(), (int)status);
+ 
+     if (status == C2_OK) {
+ #ifndef __ANDROID_APEX__  // Filters are not supported for APEX modules
+diff --git a/media/codec2/hal/client/client.cpp b/media/codec2/hal/client/client.cpp
+index cc3a1c4e01..5aa282e5c3 100644
+--- a/media/codec2/hal/client/client.cpp
++++ b/media/codec2/hal/client/client.cpp
+@@ -2760,6 +2760,16 @@ std::vector<std::string> Codec2Client::CacheServiceNames() {
+                         std::vector<std::string> *names = (std::vector<std::string> *)context;
+                         names->emplace_back(name);
+                     });
++            // [cannon] The MTK store is not part of the vendor image, so it can never be
++            // returned by forEachDeclaredInstance(). Add it when it is actually registered.
++            if (std::find(names.begin(), names.end(), "default") == names.end()) {
++                std::string instanceName =
++                        ::android::base::StringPrintf("%s/default", AidlBase::descriptor);
++                ::ndk::SpAIBinder probe(AServiceManager_checkService(instanceName.c_str()));
++                if (probe.get() != nullptr) {
++                    names.emplace_back("default");
++                }
++            }
+         } else {
+             LOG(FATAL) << "C2 AIDL cannot be selected on Android version older than 35";
+         }
+@@ -2880,11 +2890,18 @@ std::shared_ptr<Codec2Client> Codec2Client::_CreateFromIndex(size_t index) {
+         if (__builtin_available(android __ANDROID_API_S__, *)) {
+             std::string instanceName =
+                 ::android::base::StringPrintf("%s/%s", AidlBase::descriptor, name.c_str());
+-            if (AServiceManager_isDeclared(instanceName.c_str())) {
+-                std::shared_ptr<AidlBase> baseStore = AidlBase::fromBinder(
+-                        ::ndk::SpAIBinder(AServiceManager_waitForService(instanceName.c_str())));
+-                CHECK(baseStore) << "Codec2 AIDL service \"" << name << "\""
+-                                    " inaccessible for unknown reasons.";
++            // [cannon] A vendor codec2 store that is not part of the vendor image cannot be
++            // declared in the VINTF manifest (servicemanager parses it before /data is
++            // available). Probe it with checkService() instead of waitForService() so that a
++            // missing store never blocks the caller.
++            ::ndk::SpAIBinder storeBinder(AServiceManager_checkService(instanceName.c_str()));
++            if (storeBinder.get() != nullptr) {
++                std::shared_ptr<AidlBase> baseStore = AidlBase::fromBinder(std::move(storeBinder));
++                if (baseStore == nullptr) {
++                    LOG(ERROR) << "Codec2 AIDL service \"" << name << "\""
++                                  " has an unexpected interface.";
++                    return nullptr;
++                }
+                 LOG(VERBOSE) << "Client to Codec2 AIDL service \"" << name << "\" created";
+                 std::shared_ptr<c2_aidl::IConfigurable> configurable;
+                 ::ndk::ScopedAStatus transStatus = baseStore->getConfigurable(&configurable);
+@@ -2892,7 +2909,7 @@ std::shared_ptr<Codec2Client> Codec2Client::_CreateFromIndex(size_t index) {
+                                             "does not have IConfigurable.";
+                 return std::make_shared<Codec2Client>(baseStore, configurable, index);
+             } else {
+-                LOG(ERROR) << "Codec2 AIDL service \"" << name << "\" is not declared";
++                LOG(ERROR) << "Codec2 AIDL service \"" << name << "\" is not available";
+             }
+         } else {
+             LOG(FATAL) << "C2 AIDL cannot be selected on Android version older than 35";
+diff --git a/media/codec2/hal/services/android.hardware.media.c2-default-service.rc b/media/codec2/hal/services/android.hardware.media.c2-default-service.rc
+index 85ace443cd..487e954580 100644
+--- a/media/codec2/hal/services/android.hardware.media.c2-default-service.rc
++++ b/media/codec2/hal/services/android.hardware.media.c2-default-service.rc
+@@ -1,11 +1,15 @@
+ service android-hardware-media-c2-hal /vendor/bin/hw/android.hardware.media.c2-default-service
+     class hal
+     user mediacodec
+-    group camera mediadrm drmrpc
++    group camera drmrpc mediadrm media_rw sdcard_rw media system audio inet net_bt net_bt_admin net_bw_acct sdcard_r
+     ioprio rt 4
+-    # [cannon][A17] MTK blob 要的 GraphicBufferSource 由 libc2_bq_stub 提供（SONAME
+-    # 就是 libstagefright_bufferqueue_helper.so），setSmpte2094_50 由 shim 提供：
+-    # A17 的 libcodec2_vndk 引用它，而进程里解析到的是 vendor 侧 A10 的 libui。
+-    setenv LD_PRELOAD /vendor/lib64/libc2_bq_stub.so:/vendor/lib64/libshim_gbm_only.so
++    writepid /dev/cpuset/foreground/tasks
++    # [cannon][A17] 四个 shim 缺一不可：
++    #  - libshim_no_vintf   ：去掉 VINTF 稳定性标记，blob 才肯加载
++    #  - libc2_bq_stub      ：SONAME 就是 libstagefright_bufferqueue_helper.so，
++    #                         blob 的 DT_NEEDED 命中这份空实现（A17 的 bqhelper
++    #                         装不进 /vendor）
++    #  - libshim_gbm_only   ：GraphicBufferMapper 6 参数 lock
++    #  - libshim_dmabuf_alloc：BufferAllocator 3 参数重载
++    setenv LD_PRELOAD /vendor/lib64/libshim_no_vintf.so:/vendor/lib64/libc2_bq_stub.so:/vendor/lib64/libshim_gbm_only.so:/vendor/lib64/libshim_dmabuf_alloc.so
+     task_profiles ProcessCapacityHigh
+-
+diff --git a/media/codec2/hal/services/vendor.cpp b/media/codec2/hal/services/vendor.cpp
+index 01d0f292b2..3f4cb08667 100644
+--- a/media/codec2/hal/services/vendor.cpp
++++ b/media/codec2/hal/services/vendor.cpp
+@@ -179,8 +179,9 @@ private:
+ };
+ 
+ 
+-// [cannon][A17] MTK 的 C2 实现只有 A10 的 HIDL 版（@1.2-mediatek），A17 framework
+-// 只认 AIDL store。MTK 自己带了 libcodec2_mtk_c2store.so（C2ComponentStore 实现，
++// [cannon][A17] vendor 底包是 MIUI 13 / Android 12（V13.0.3.0.SJEMIXM，
++// SP1A.210812.016），MTK 的 C2 实现是 HIDL @1.2-mediatek，A17 framework 只认
++// AIDL store。MTK 自己带了 libcodec2_mtk_c2store.so（C2ComponentStore 实现，
+ // 直接管理 vdec/venc 插件），这里直接实例化它当 AIDL store 的后端，
+ // 绕开 HIDL 那一层（A17 已无 HIDL codec2 客户端路径可复用）。
+ // 没有头文件，用 blob 的构造函数符号 + 8KB 缓冲区（对象大小由 blob 自己决定），
+@@ -191,6 +192,23 @@ static std::shared_ptr<C2ComponentStore> createMtkComponentStore() {
+         LOG(ERROR) << "cannot dlopen libcodec2_mtk_c2store.so: " << dlerror();
+         return nullptr;
+     }
++    // 优先用 blob 自己导出的工厂函数：它内部 new 出来的对象大小是对的。
++    // 之前手写 calloc(8192) + ctor 的做法在视频组件上会出问题
++    // （createInterface 直接返回 C2_TIMED_OUT，音频组件却正常）。
++    using GetStoreFn = std::shared_ptr<C2ComponentStore> (*)();
++    GetStoreFn getStore = reinterpret_cast<GetStoreFn>(
++            dlsym(handle, "_ZN7android26GetCodec2MtkComponentStoreEv"));
++    if (getStore != nullptr) {
++        std::shared_ptr<C2ComponentStore> store = getStore();
++        if (store != nullptr) {
++            LOG(INFO) << "MTK C2ComponentStore obtained via GetCodec2MtkComponentStore()";
++            return store;
++        }
++        LOG(ERROR) << "GetCodec2MtkComponentStore() returned nullptr";
++    } else {
++        LOG(ERROR) << "cannot dlsym GetCodec2MtkComponentStore: " << dlerror();
++    }
++
+     using CtorFn = void (*)(void*);
+     CtorFn ctor = reinterpret_cast<CtorFn>(
+             dlsym(handle, "_ZN7android19C2MtkComponentStoreC1Ev"));
+@@ -245,7 +263,8 @@ void runAidlService() {
+         if (ex != EX_NONE) {
+             LOG(ERROR) << "Cannot register Codec2's IComponentStore service"
+                           " with instance name << \""
+-                       << serviceName << "\".";
++                       << serviceName << "\", ex=" << static_cast<int>(ex)
++                       << " (" << strerror(-static_cast<int>(ex)) << ")";
+         } else {
+             LOG(DEBUG) << "Codec2's IComponentStore service registered. "
+                           "Instance name: \"" << serviceName << "\".";

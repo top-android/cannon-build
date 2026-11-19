@@ -1,0 +1,206 @@
+diff --git a/assets/carrier_config_carrierid_1435_China-Mobile.xml b/assets/carrier_config_carrierid_1435_China-Mobile.xml
+index f5fae85..75b9b6e 100644
+--- a/assets/carrier_config_carrierid_1435_China-Mobile.xml
++++ b/assets/carrier_config_carrierid_1435_China-Mobile.xml
+@@ -6,4 +6,7 @@
+     <boolean name="allow_hold_video_call_bool" value="false" />
+     <boolean name="support_video_conference_call_bool" value="false"/>
+     <int name="default_mtu_int" value="1400"/>
++    <boolean name="carrier_name_override_bool" value="true" />
++    <string name="carrier_name_string">中国移动</string>
++    <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
+ </carrier_config>
+diff --git a/assets/carrier_config_carrierid_1436_China-Unicom.xml b/assets/carrier_config_carrierid_1436_China-Unicom.xml
+index dcef691..311b2a4 100644
+--- a/assets/carrier_config_carrierid_1436_China-Unicom.xml
++++ b/assets/carrier_config_carrierid_1436_China-Unicom.xml
+@@ -1,4 +1,7 @@
+ <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+ <carrier_config>
+     <boolean name="allow_emergency_numbers_in_call_log_bool" value="true"/>
++    <boolean name="carrier_name_override_bool" value="true" />
++    <string name="carrier_name_string">中国联通</string>
++    <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
+ </carrier_config>
+diff --git a/assets/carrier_config_carrierid_2237_China-Telecom.xml b/assets/carrier_config_carrierid_2237_China-Telecom.xml
+index f398957..8ab3a4a 100644
+--- a/assets/carrier_config_carrierid_2237_China-Telecom.xml
++++ b/assets/carrier_config_carrierid_2237_China-Telecom.xml
+@@ -1,20 +1,6 @@
+ <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+ <carrier_config>
+-    <boolean name="allow_emergency_numbers_in_call_log_bool" value="true"/>
+-    <boolean name="show_apn_setting_cdma_bool" value="true"/>
+-    <string name="sim_country_iso_override_string">cn</string>
+-    <boolean name="ascii_7_bit_support_for_long_message_bool" value="true"/>
+-    <string-array name="telephony_network_capability_priorities_string_array" num="11">
+-        <item value="eims:90"/>
+-        <item value="supl:80"/>
+-        <item value="mms:70"/>
+-        <item value="xcap:60"/>
+-        <item value="cbs:50"/>
+-        <item value="mcx:50"/>
+-        <item value="fota:50"/>
+-        <item value="ims:40"/>
+-        <item value="dun:30"/>
+-        <item value="enterprise:20"/>
+-        <item value="internet:20"/>
+-    </string-array>
++    <boolean name="carrier_name_override_bool" value="true" />
++    <string name="carrier_name_string">中国电信</string>
++    <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
+ </carrier_config>
+diff --git a/assets/carrier_config_mccmnc_46000.xml b/assets/carrier_config_mccmnc_46000.xml
+new file mode 100644
+index 0000000..2595c01
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46000.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国移动</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46001.xml b/assets/carrier_config_mccmnc_46001.xml
+new file mode 100644
+index 0000000..4d22696
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46001.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国联通</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46002.xml b/assets/carrier_config_mccmnc_46002.xml
+new file mode 100644
+index 0000000..2595c01
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46002.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国移动</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46003.xml b/assets/carrier_config_mccmnc_46003.xml
+new file mode 100644
+index 0000000..1402884
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46003.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国电信</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46004.xml b/assets/carrier_config_mccmnc_46004.xml
+new file mode 100644
+index 0000000..2595c01
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46004.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国移动</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46005.xml b/assets/carrier_config_mccmnc_46005.xml
+new file mode 100644
+index 0000000..1402884
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46005.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国电信</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46006.xml b/assets/carrier_config_mccmnc_46006.xml
+new file mode 100644
+index 0000000..4d22696
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46006.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国联通</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46007.xml b/assets/carrier_config_mccmnc_46007.xml
+new file mode 100644
+index 0000000..2595c01
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46007.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国移动</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46008.xml b/assets/carrier_config_mccmnc_46008.xml
+new file mode 100644
+index 0000000..2595c01
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46008.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国移动</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46009.xml b/assets/carrier_config_mccmnc_46009.xml
+new file mode 100644
+index 0000000..4d22696
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46009.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国联通</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>
+diff --git a/assets/carrier_config_mccmnc_46011.xml b/assets/carrier_config_mccmnc_46011.xml
+new file mode 100644
+index 0000000..1402884
+--- /dev/null
++++ b/assets/carrier_config_mccmnc_46011.xml
+@@ -0,0 +1,8 @@
++<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
++<carrier_config_list>
++    <carrier_config>
++        <boolean name="carrier_name_override_bool" value="true" />
++        <string name="carrier_name_string">中国电信</string>
++            <boolean name="spn_display_rule_use_roaming_from_service_state_bool" value="true" />
++</carrier_config>
++</carrier_config_list>

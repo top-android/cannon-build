@@ -93,6 +93,11 @@ ARCHIVE_ONLY=(
   hardware_mediatek_wlan.patch
   packages_modules_Wifi.patch
   external_chromium-webview_prebuilt_x86_64.patch
+  # [2026-11-20] 已 fork 到 top-android 并固化（local_manifests/cannon-a17.xml），patch 仅归档
+  frameworks_av.patch
+  packages_apps_CarrierConfig.patch
+  packages_apps_ThemePicker.patch
+  packages_services_Telephony.patch
 )
 unregistered=()
 for _pf in "$PATCHDIR"/*.patch; do

@@ -55,6 +55,84 @@ index 703430644..1bdb39305 100644
                  }
              }
          } else {
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/connectivity/MobileSignalController.java b/packages/SystemUI/src/com/android/systemui/statusbar/connectivity/MobileSignalController.java
+index a6ac37202..e49e045d7 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/connectivity/MobileSignalController.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/connectivity/MobileSignalController.java
+@@ -237,12 +237,9 @@ public class MobileSignalController extends SignalController<MobileState, Mobile
+             if (mInflateSignalStrengths) {
+                 level++;
+             }
+-            boolean dataDisabled = mCurrentState.userSetup
+-                    && (mCurrentState.iconGroup == TelephonyIcons.DATA_DISABLED
+-                    || (mCurrentState.iconGroup == TelephonyIcons.NOT_DEFAULT_DATA
+-                            && mCurrentState.defaultDataOff));
+-            boolean noInternet = mCurrentState.inetCondition == 0;
+-            boolean cutOut = dataDisabled || noInternet;
++            // [cannon] 国内 ROM 不在信号格上叠加"!"/"x"：数据关闭或网络未通过验证时
++            // 也只显示纯信号格，避免出现「4 格信号 + 感叹号」这种状态。
++            boolean cutOut = false;
+             return SignalDrawable.getState(level, getNumLevels(), cutOut);
+         } else if (mCurrentState.enabled) {
+             return SignalDrawable.getEmptyState(getNumLevels());
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractor.kt b/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractor.kt
+index d855c6cf6..91169f5a1 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractor.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractor.kt
+@@ -308,15 +308,20 @@ class MobileIconInteractorImpl(
+ 
+     override val isAllowedDuringAirplaneMode = connectionRepository.isAllowedDuringAirplaneMode
+ 
+-    /** Whether or not to show the error state of [SignalDrawable] for cellular connections */
++    /**
++     * Whether or not to show the error state of [SignalDrawable] for cellular connections.
++     *
++     * [cannon] 国内 ROM 不在信号格上叠加"!"：数据关闭、网络还没通过校验、无服务时都只显示
++     * 纯信号格，避免出现「4 格信号 + 感叹号」这种状态。
++     */
+     private val showExclamationMarkForCellular: StateFlow<Boolean> =
+         combine(defaultSubscriptionHasDataEnabled, isDefaultConnectionFailed, isInService) {
+-                isDefaultDataEnabled,
+-                isDefaultConnectionFailed,
+-                isInService ->
+-                !isDefaultDataEnabled || isDefaultConnectionFailed || !isInService
++                _,
++                _,
++                _ ->
++                false
+             }
+-            .stateIn(scope, SharingStarted.WhileSubscribed(), true)
++            .stateIn(scope, SharingStarted.WhileSubscribed(), false)
+ 
+     /** Whether or not to show the error state of [SignalDrawable] for satellite connection */
+     private val showExclamationMarkForSatellite: StateFlow<Boolean> =
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractorKairos.kt b/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractorKairos.kt
+index dd10864f6..af5ec148e 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractorKairos.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/domain/interactor/MobileIconInteractorKairos.kt
+@@ -298,13 +298,17 @@ class MobileIconInteractorKairosImpl(
+     override val isAllowedDuringAirplaneMode: State<Boolean>
+         get() = connectionRepository.isAllowedDuringAirplaneMode
+ 
+-    /** Whether or not to show the error state of [SignalDrawable] for cellular connections */
++    /**
++     * Whether or not to show the error state of [SignalDrawable] for cellular connections.
++     *
++     * [cannon] 国内 ROM 不在信号格上叠加"!"，只显示纯信号格。
++     */
+     private val showExclamationMarkForCellular: State<Boolean> =
+         combine(defaultSubscriptionHasDataEnabled, isDefaultConnectionFailed, isInService) {
+-            isDefaultDataEnabled,
+-            isDefaultConnectionFailed,
+-            isInService ->
+-            !isDefaultDataEnabled || isDefaultConnectionFailed || !isInService
++            _,
++            _,
++            _ ->
++            false
+         }
+ 
+     /** Whether or not to show the error state of [SignalDrawable] for satellite connections */
 diff --git a/services/core/java/com/android/server/DockObserver.java b/services/core/java/com/android/server/DockObserver.java
 index d2db8f74c..4c2dd8dee 100644
 --- a/services/core/java/com/android/server/DockObserver.java
@@ -115,6 +193,317 @@ index 8c4efbae0..04051232e 100644
              MediaPlayer mediaPlayer = new MediaPlayer();
              try {
                  String filePath = getResourceFilePath(res);
+diff --git a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+index 1a211c999..452735649 100644
+--- a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
++++ b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+@@ -1262,9 +1262,12 @@ public class GnssLocationProvider extends AbstractLocationProvider implements
+             int interval = mGnssNative.getCapabilities().hasScheduling() ? mFixInterval : 1000;
+             if (!setPositionMode(mPositionMode, GNSS_POSITION_RECURRENCE_PERIODIC,
+                     interval, mProviderRequest.isLowPower())) {
+-                setStarted(false);
+-                Log.e(TAG, "set_position_mode failed in startNavigating()");
+-                return;
++                // cannon: MTK's AIDL GNSS wrapper rejects setPositionMode(), and
++                // aborting here leaves the engine off forever: start() is never
++                // called, so mnld never sets up its HAL socket and no fix is
++                // ever produced. Keep going; if the HAL really needed the
++                // position mode it will fail start() right below.
++                Log.w(TAG, "set_position_mode failed in startNavigating(), continuing to start()");
+             }
+             if (!mGnssNative.start()) {
+                 setStarted(false);
+diff --git a/services/core/java/com/android/server/location/gnss/hal/GnssNative.java b/services/core/java/com/android/server/location/gnss/hal/GnssNative.java
+index 4e5d042e8..e22c98c66 100644
+--- a/services/core/java/com/android/server/location/gnss/hal/GnssNative.java
++++ b/services/core/java/com/android/server/location/gnss/hal/GnssNative.java
+@@ -541,8 +541,12 @@ public class GnssNative {
+ 
+         // gnss chipset appears to require an init/cleanup cycle on startup in order to properly
+         // initialize - undocumented and no idea why this is the case
++        //
++        // cannon: MTK's A12 HAL builds the @mtk_mnl2hal uplink inside setCallback() and tears
++        // it down in close(). The immediate cleanup below therefore left the HAL running with
++        // no uplink at all (mnld gets ECONNREFUSED for every NMEA/SV/measurement), and later
++        // setCallback() calls do not recreate it. Skip the cycle on this device.
+         if (mGnssHal.init()) {
+-            mGnssHal.cleanup();
+             Log.i(TAG, "gnss hal initialized");
+         } else {
+             Log.e(TAG, "gnss hal initialization failed");
+diff --git a/services/core/java/com/android/server/pm/ComputerEngine.java b/services/core/java/com/android/server/pm/ComputerEngine.java
+index d89a830ed..4d6bd2ad3 100644
+--- a/services/core/java/com/android/server/pm/ComputerEngine.java
++++ b/services/core/java/com/android/server/pm/ComputerEngine.java
+@@ -3388,9 +3388,20 @@ public class ComputerEngine implements Computer {
+                 Slog.v(TAG, "Best match: 0x" + Integer.toHexString(match));
+             }
+             match &= IntentFilter.MATCH_CATEGORY_MASK;
+-            final int m = prefs.size();
++
++            // A later explicit choice must win over an older one. The resolver returns the
++            // entries in insertion order (stable sort by priority) and the first entry that
++            // also appears in the query is returned below, so a stale per-MIME preference
++            // (e.g. video/mp4 -> A) would keep beating a newer wildcard preference
++            // (video/* -> B) even after the user changed the default. Walk the list backwards
++            // to visit the most recently added entry first, keeping higher priorities ahead.
++            final ArrayList<PreferredActivity> ordered = new ArrayList<>(prefs);
++            Collections.reverse(ordered);
++            ordered.sort(Comparator.comparingInt(PreferredActivity::getPriority).reversed());
++
++            final int m = ordered.size();
+             for (int i = 0; i < m; i++) {
+-                final PreferredActivity pa = prefs.get(i);
++                final PreferredActivity pa = ordered.get(i);
+                 if (DEBUG_PREFERRED || debug) {
+                     Slog.v(TAG, "Checking PreferredActivity ds="
+                             + (pa.countDataSchemes() > 0 ? pa.getDataScheme(0) : "<none>")
+@@ -3464,68 +3475,11 @@ public class ComputerEngine implements Computer {
+                     }
+ 
+                     // Okay we found a previously set preferred or last chosen app.
+-                    // If the result set is different from when this
+-                    // was created, and is not a subset of the preferred set, we need to
+-                    // clear it and re-ask the user their preference, if we're looking for
+-                    // an "always" type entry.
+-
+-                    if (always
+-                            && !pa.mPref.sameSet(query, excludeSetupWizardHomeActivity, userId)) {
+-                        if (pa.mPref.isSuperset(query, excludeSetupWizardHomeActivity)) {
+-                            if (allowSetMutation) {
+-                                // some components of the set are no longer present in
+-                                // the query, but the preferred activity can still be reused
+-                                if (DEBUG_PREFERRED) {
+-                                    Slog.i(TAG, "Result set changed, but PreferredActivity"
+-                                            + " is still valid as only non-preferred"
+-                                            + " components were removed for " + intent
+-                                            + " type " + resolvedType);
+-                                }
+-                                // remove obsolete components and re-add the up-to-date
+-                                // filter
+-                                PreferredActivity freshPa = new PreferredActivity(pa,
+-                                        pa.mPref.mMatch,
+-                                        pa.mPref.discardObsoleteComponents(query),
+-                                        pa.mPref.mComponent,
+-                                        pa.mPref.mAlways);
+-                                pir.removeFilter(pa);
+-                                pir.addFilter(this, freshPa);
+-                                result.mChanged = true;
+-                            } else {
+-                                if (DEBUG_PREFERRED) {
+-                                    Slog.i(TAG, "Do not remove preferred activity");
+-                                }
+-                            }
+-                        } else {
+-                            final boolean isHomeActivity = ACTION_MAIN.equals(intent.getAction())
+-                                    && intent.hasCategory(CATEGORY_HOME);
+-                            if (!isHomeActivity) {
+-                                // Don't reset the preferred activity just for the home intent, we
+-                                // should respect the default home app even though there any new
+-                                // home activity is enabled.
+-                                if (allowSetMutation) {
+-                                    Slog.i(TAG,
+-                                            "Result set changed, dropping preferred activity "
+-                                                    + "for " + intent + " type "
+-                                                    + resolvedType);
+-                                    if (DEBUG_PREFERRED) {
+-                                        Slog.v(TAG,
+-                                                "Removing preferred activity since set changed "
+-                                                        + pa.mPref.mComponent);
+-                                    }
+-                                    pir.removeFilter(pa);
+-                                    // Re-add the filter as a "last chosen" entry (!always)
+-                                    PreferredActivity lastChosen = new PreferredActivity(
+-                                            pa, pa.mPref.mMatch, null, pa.mPref.mComponent,
+-                                            false);
+-                                    pir.addFilter(this, lastChosen);
+-                                    result.mChanged = true;
+-                                }
+-                                result.mPreferredResolveInfo = null;
+-                                return result;
+-                            }
+-                        }
+-                    }
++                    // [cannon] Keep the user's explicit default even when the set of handlers
++                    // changed since it was recorded. The preferred component is still in the
++                    // query (checked above), and dropping the preference here makes a chosen
++                    // default useless as soon as one more app starts handling the type: the
++                    // chooser then comes back on every single resolve.
+ 
+                     // Yay! Either the set matched or we're looking for the last chosen
+                     if (DEBUG_PREFERRED || debug) {
+diff --git a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
+index 27935d0ea..80255a7cb 100644
+--- a/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
++++ b/services/core/java/com/android/server/pm/PackageManagerServiceUtils.java
+@@ -1301,8 +1301,14 @@ public class PackageManagerServiceUtils {
+         // There are several items that need to be combined together to safely
+         // identify cached items. In particular, changing the value of certain
+         // feature flags should cause us to invalidate any caches.
++        // Also key the cache on the build timestamp. Devices that pin the vendor
++        // fingerprint (common on Xiaomi/MTK trees) keep the same FINGERPRINT across builds,
++        // and for directory-style system apps PackageCacher's freshness check compares the
++        // *directory* mtime, which is a constant on read-only images. Without this a
++        // replaced priv-app APK would never be re-parsed after an update.
+         final String cacheName = FORCE_PACKAGE_PARSED_CACHE_ENABLED ? "debug"
+-                : PackagePartitions.FINGERPRINT;
++                : PackagePartitions.FINGERPRINT + "-"
++                        + SystemProperties.get("ro.build.date.utc", "0");
+ 
+         // Reconcile cache directories, keeping only what we'd actually use.
+         for (File cacheDir : FileUtils.listFilesOrEmpty(cacheBaseDir)) {
+diff --git a/services/core/java/com/android/server/pm/PreferredActivityHelper.java b/services/core/java/com/android/server/pm/PreferredActivityHelper.java
+index fa56596bf..bb77ca215 100644
+--- a/services/core/java/com/android/server/pm/PreferredActivityHelper.java
++++ b/services/core/java/com/android/server/pm/PreferredActivityHelper.java
+@@ -63,6 +63,7 @@ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.Set;
+ 
+ final class PreferredActivityHelper {
+     // XML tags for backup/restore of various bits of state
+@@ -213,6 +214,9 @@ final class PreferredActivityHelper {
+             if (removeExisting && existing != null) {
+                 Settings.removeFilters(pir, filter, existing);
+             }
++            if (always) {
++                removeOverlappingPreferredActivities(pir, filter.getIntentFilter());
++            }
+             pir.addFilter(mPm.snapshotComputer(),
+                     new PreferredActivity(filter, match, set, activity, always));
+             mPm.scheduleWritePackageRestrictions(userId);
+@@ -755,4 +759,129 @@ final class PreferredActivityHelper {
+         return findPreferredActivityNotLocked(snapshot, intent, resolvedType, flags, query, false,
+                 false, false, userId);
+     }
++
++    /**
++     * Drops existing "always" preferences that overlap the filter being added, as long as they
++     * are not broader than it.
++     *
++     * {@link ComputerEngine#findPreferredActivityBody} only considers preferences whose match
++     * category equals the best normal match, and then returns the first one whose component is
++     * in the query. A stale per-MIME entry (e.g. video/mp4 -> A, created by picking "always" in
++     * the chooser) therefore keeps beating a default the user sets later for the whole family
++     * (video/* -> B), no matter which one was added last. Since adding an "always" preference is
++     * an explicit user choice, evict the narrower overlapping entries so that the choice really
++     * takes effect.
++     *
++     * Broader entries are left alone on purpose: choosing a default for video/mp4 must not wipe
++     * the user's video/* default for every other video type.
++     */
++    private static void removeOverlappingPreferredActivities(
++            @NonNull PreferredIntentResolver pir, @NonNull IntentFilter filter) {
++        if (filter.countDataTypes() == 0) {
++            return;
++        }
++        final Set<PreferredActivity> all = pir.filterSet();
++        if (all.isEmpty()) {
++            return;
++        }
++        ArrayList<PreferredActivity> doomed = null;
++        for (PreferredActivity cur : all) {
++            if (!cur.mPref.mAlways || !filtersOverlap(filter, cur.getIntentFilter())) {
++                continue;
++            }
++            // cur is broader than the filter being added (e.g. cur=video/*, new=video/mp4):
++            // keep it, the new entry only covers a subset of what it already handles.
++            if (hasPartialTypes(cur.getIntentFilter()) && !hasPartialTypes(filter)) {
++                continue;
++            }
++            if (doomed == null) {
++                doomed = new ArrayList<>();
++            }
++            doomed.add(cur);
++        }
++        if (doomed == null) {
++            return;
++        }
++        if (DEBUG_PREFERRED) {
++            Slog.v(TAG, "Removing " + doomed.size() + " overlapping preferred activities for "
++                    + filter);
++        }
++        for (PreferredActivity cur : doomed) {
++            pir.removeFilter(cur);
++        }
++    }
++
++    /** Whether two filters can match the same intent (same action, intersecting types/schemes). */
++    private static boolean filtersOverlap(@NonNull IntentFilter a, @NonNull IntentFilter b) {
++        boolean action = false;
++        for (int i = 0; i < a.countActions(); i++) {
++            if (b.hasAction(a.getAction(i))) {
++                action = true;
++                break;
++            }
++        }
++        if (!action) {
++            return false;
++        }
++
++        final int na = a.countDataTypes();
++        final int nb = b.countDataTypes();
++        if (na == 0 || nb == 0) {
++            // Only MIME-typed preferences are handled here; scheme-only ones (e.g. mailto)
++            // are left untouched.
++            return false;
++        }
++        boolean type = false;
++        for (int i = 0; i < na && !type; i++) {
++            for (int j = 0; j < nb; j++) {
++                if (dataTypesOverlap(a, a.getDataType(i), b, b.getDataType(j))) {
++                    type = true;
++                    break;
++                }
++            }
++        }
++        if (!type) {
++            return false;
++        }
++
++        final int sa = a.countDataSchemes();
++        final int sb = b.countDataSchemes();
++        if (sa > 0 && sb > 0) {
++            boolean scheme = false;
++            for (int i = 0; i < sa && !scheme; i++) {
++                if (b.hasDataScheme(a.getDataScheme(i))) {
++                    scheme = true;
++                }
++            }
++            if (!scheme) {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    /** IntentFilter stores a partial type ("video/*") as its base name ("video"). */
++    private static boolean isPartialType(String type) {
++        return type.indexOf('/') < 0;
++    }
++
++    private static boolean hasPartialTypes(IntentFilter filter) {
++        for (int i = 0; i < filter.countDataTypes(); i++) {
++            if (isPartialType(filter.getDataType(i))) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    private static boolean dataTypesOverlap(IntentFilter a, String ta, IntentFilter b, String tb) {
++        if (ta.equals(tb)) {
++            return true;
++        }
++        // Partial types are stored without the "/*" suffix, so "video" covers "video/mp4".
++        if (isPartialType(ta) && tb.startsWith(ta + "/")) {
++            return true;
++        }
++        return isPartialType(tb) && ta.startsWith(tb + "/");
++    }
+ }
 diff --git a/services/core/java/com/android/server/power/Notifier.java b/services/core/java/com/android/server/power/Notifier.java
 index e334af481..1111c99f5 100644
 --- a/services/core/java/com/android/server/power/Notifier.java

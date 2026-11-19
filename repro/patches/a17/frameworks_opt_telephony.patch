@@ -77,7 +77,7 @@ index afb9905..5ebc40e 100644
                      }
                  }
 diff --git a/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java b/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
-index 9a33237..5a08570 100644
+index 9a33237..36bba5d 100644
 --- a/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
 +++ b/src/java/com/android/internal/telephony/imsphone/ImsPhoneCallTracker.java
 @@ -235,6 +235,15 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
@@ -107,7 +107,7 @@ index 9a33237..5a08570 100644
      private Call.SrvccState mSrvccState = Call.SrvccState.NONE;
      private TelephonyManager mTelephonyManager;
      private CarrierRoamingNtnListener mCarrierRoamingNtnListener;
-@@ -1953,6 +1966,70 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
+@@ -1953,6 +1966,108 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
                  mThresholdRtpPacketLoss, mThresholdRtpJitter, mThresholdRtpInactivityTime);
          updateAllowedServices(ImsRegistrationImplBase.REGISTRATION_TECH_LTE);
          updateAllowedServices(ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN);
@@ -129,7 +129,45 @@ index 9a33237..5a08570 100644
 +            return;
 +        }
 +        mBootVolteReapplyArmed = true;
-+        postDelayed(this::bootVolteReapplyOnce, BOOT_VOLTE_REAPPLY_DELAY_MS);
++
++        // [cannon][A17] 优先在 carrier config 就绪后立刻重放，比固定等 12s 快 6~10s。
++        // 冷启动时框架推 IMS 能力早于 MTK 的 ImsConfig 就绪，必须等 carrier config
++        // 落地后再做一次 VoLTE off->on，MTK 才会真正注册。
++        // 固定延迟保留为兜底（仅当还没重放过时触发），避免广播没来导致永不注册。
++        try {
++            final Context ctx = mPhone.getContext();
++            final CarrierConfigManager ccm = ctx.getSystemService(CarrierConfigManager.class);
++            final int subId = mPhone.getSubId();
++            if (ccm != null && ccm.getConfigForSubId(subId) != null) {
++                logi("bootVolteReapply: carrier config already cached, replay in 2s");
++                postDelayed(this::bootVolteReapplyOnce, 2000);
++            } else {
++                BroadcastReceiver recv = new BroadcastReceiver() {
++                    @Override
++                    public void onReceive(Context c, Intent intent) {
++                        logi("bootVolteReapply: carrier config ready, replay in 1s");
++                        try {
++                            c.unregisterReceiver(this);
++                        } catch (Exception ignored) {
++                        }
++                        postDelayed(ImsPhoneCallTracker.this::bootVolteReapplyOnce, 1000);
++                    }
++                };
++                ctx.registerReceiver(recv,
++                        new IntentFilter(CarrierConfigManager.ACTION_CARRIER_CONFIG_CHANGED));
++                logi("bootVolteReapply: armed on ACTION_CARRIER_CONFIG_CHANGED");
++            }
++        } catch (Exception e) {
++            loge("bootVolteReapply: carrier-config hook failed: " + e);
++        }
++
++        // 兜底：如果 carrier config 广播/缓存都没触发过重放，才在 12s 后补一次
++        postDelayed(() -> {
++            if (mBootVolteReapplyTries == 0) {
++                logi("bootVolteReapply: fallback timer firing");
++                bootVolteReapplyOnce();
++            }
++        }, BOOT_VOLTE_REAPPLY_DELAY_MS);
 +    }
 +
 +    private void bootVolteReapplyOnce() {

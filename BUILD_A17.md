@@ -244,3 +244,43 @@ OUT_DIR=/cannon/out-user CANNON_VARIANT=user JOBS=$(nproc) ./build-a17.sh build
 ```
 
 > 说明：本版 ROM 的 codec2 固定 `media.c2.hal.selection=aidl`（软解）；MTK A10 的 HIDL store 在 A17 客户端下 `start()` 会死锁，已回退。
+
+## 2026-11-20 源码状态固化（含硬解/三个功能模块）
+
+- 新清单：`manifests/a17-pinned-2026-11-20.xml`（`PINNED_MANIFEST=latest` 按 mtime 会选中它）
+- **9 个改动仓全部 fork 到 `top-android/*` 的 `cannon-a17` 分支**，SHA 固定在新清单里：
+
+| 仓 | fork | 提交 |
+|---|---|---|
+| device/xiaomi/cannon | android_device_xiaomi_cannon | `2175a34` |
+| vendor/xiaomi/cannon | android_vendor_xiaomi_cannon | `32e9dfd` |
+| frameworks/av | android_frameworks_av | `91b123f` |
+| frameworks/base | android_frameworks_base | `54e07df9` |
+| packages/apps/Settings | android_packages_apps_Settings | `db9f7c3` |
+| packages/apps/Launcher3 | android_packages_apps_Launcher3 | `baa603c` |
+| packages/apps/CarrierConfig | android_packages_apps_CarrierConfig | `c179174` |
+| packages/apps/ThemePicker | android_packages_apps_ThemePicker | `4110d93` |
+| packages/services/Telephony | android_packages_services_Telephony | `07cb13a` |
+
+- `local_manifests/cannon-a17.xml` 新增 4 条 fork 覆盖（CarrierConfig / ThemePicker /
+  services/Telephony / frameworks/av——最后一个此前只在锁定清单里，分支模式会漏）。
+- 后三个仓（CarrierConfig / ThemePicker / services/Telephony）是**新建的 GitHub 仓**：
+  它们原先没有可用 push 权限的上游，`gh repo create top-android/...` 建好后推 `cannon-a17`。
+  由于本地是 `repo --depth=1` 浅克隆，向空仓推送会报
+  `remote: fatal: did not receive expected object ...`；**解决办法是先 `git fetch --unshallow <上游>`
+  再推**（补齐浅边界之前的祖先，GitHub 才收）。
+- 补丁目录同步重导：21 个 apply 补丁 + 11 个归档补丁，`drift=0 fail=0`。
+- 全新复现：
+
+```bash
+PINNED_MANIFEST=manifests/a17-pinned-2026-11-20.xml ./build-a17.sh init
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh sync
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh apply   # 幂等，已应用会跳过
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user JOBS=$(nproc) ./build-a17.sh build
+```
+
+> 修正上一节的说明：codec2 **已改为 AIDL 硬解可用**（Moonlight 串流验证通过）。
+> 核心是 patch `libstagefright_foundation` 的 `AHandler::deliverMessage`（tail-call
+> `onMessageReceived`，vtable `+0x30`/`+0x40` 自适应）+ seccomp/VINTF/sepolicy 放行，
+> 详见 `repro/patches/a17/frameworks_av.patch` 与 `device_xiaomi_cannon.patch`。
+> `media.c2.hal.selection=aidl` 保持不变，HIDL store 仍然不用。

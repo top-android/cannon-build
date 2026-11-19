@@ -31,6 +31,9 @@
     <remove-project name="LineageOS/android_frameworks_base" />
     <project path="frameworks/base" name="top-android/android_frameworks_base" remote="github" revision="cannon-a17" />
 
+    <remove-project name="LineageOS/android_frameworks_av" />
+    <project path="frameworks/av" name="top-android/android_frameworks_av" remote="devs" revision="cannon-a17" />
+
     <remove-project name="LineageOS/android_frameworks_native" />
     <project path="frameworks/native" name="top-android/android_frameworks_native" remote="github" revision="cannon-a17" />
 
@@ -54,6 +57,17 @@
 
     <remove-project name="LineageOS/android_packages_apps_Settings" />
     <project path="packages/apps/Settings" name="top-android/android_packages_apps_Settings" remote="github" revision="cannon-a17" />
+
+    <!-- 2026-11-20：这三个仓原本只靠 build-time 补丁，现已 fork 固化（运营商名中文化、
+         桌面布局行列、运营商配置缓存按构建时间失效） -->
+    <remove-project name="platform/packages/apps/CarrierConfig" />
+    <project path="packages/apps/CarrierConfig" name="top-android/android_packages_apps_CarrierConfig" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_packages_apps_ThemePicker" />
+    <project path="packages/apps/ThemePicker" name="top-android/android_packages_apps_ThemePicker" remote="github" revision="cannon-a17" />
+
+    <remove-project name="LineageOS/android_packages_services_Telephony" />
+    <project path="packages/services/Telephony" name="top-android/android_packages_services_Telephony" remote="github" revision="cannon-a17" />
 
     <remove-project name="platform/packages/modules/NetworkStack" />
     <project path="packages/modules/NetworkStack" name="top-android/android_packages_modules_NetworkStack" remote="github" revision="cannon-a17" />

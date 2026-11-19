@@ -1,0 +1,139 @@
+diff --git a/res/layout/floating_sheet_grid.xml b/res/layout/floating_sheet_grid.xml
+index 450fc698..ed147c52 100644
+--- a/res/layout/floating_sheet_grid.xml
++++ b/res/layout/floating_sheet_grid.xml
+@@ -43,7 +43,7 @@
+             layout="@layout/grid_option2"
+             android:id="@+id/invisible_grid_option"
+             android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
++            android:layout_height="208dp"
+             android:visibility="invisible"/>
+ 
+         <androidx.recyclerview.widget.RecyclerView
+diff --git a/res/values-zh-rCN/strings.xml b/res/values-zh-rCN/strings.xml
+index 99247f29..3fee39d3 100644
+--- a/res/values-zh-rCN/strings.xml
++++ b/res/values-zh-rCN/strings.xml
+@@ -92,6 +92,7 @@
+     <string name="font_card_body" msgid="6790525594503904468">"将您喜爱的字体应用于每个屏幕上的文字"</string>
+     <string name="grid_options_title" msgid="7071930966989877023">"选择网格大小"</string>
+     <string name="grid_title_pattern" msgid="9188866567612607806">"<xliff:g id="ID_1">%1$d</xliff:g>x<xliff:g id="ID_2">%2$d</xliff:g>"</string>
++    <string name="grid_title_rows_cols">"<xliff:g id="ID_1">%1$d</xliff:g> 行 × <xliff:g id="ID_2">%2$d</xliff:g> 列"</string>
+     <string name="grid_content_description" msgid="5312080295600578441">"<xliff:g id="ID_1">%1$d</xliff:g> x <xliff:g id="ID_2">%2$d</xliff:g>"</string>
+     <string name="apply_grid_btn_note" msgid="2966021967355139181">"更改网格大小将会重新加载工作区，这可能需要几秒钟的时间。"</string>
+     <string name="toast_of_changing_grid" msgid="3515633981312731121">"正在重新加载网格大小为“%1$s”的工作区"</string>
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index 2c6a53f3..658d8f6e 100755
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -261,6 +261,9 @@
+     <!--Title for a grid option, describing the number of columns and rows, eg: 4x4 [CHAR LIMIT=10] -->
+     <string name="grid_title_pattern"><xliff:g name="num_cols" example="1">%1$d</xliff:g>x<xliff:g name="num_rows" example="1">%2$d</xliff:g></string>
+ 
++    <!--Title for a grid option, describing rows first and then columns, eg: 5 rows x 4 cols [CHAR LIMIT=20] -->
++    <string name="grid_title_rows_cols"><xliff:g name="num_rows" example="5">%1$d</xliff:g> rows \u00d7 <xliff:g name="num_cols" example="4">%2$d</xliff:g> cols</string>
++
+     <!--Copntent description for a grid option, describing the number of columns and rows, eg: 4 by 4 [CHAR LIMIT=10] -->
+     <string name="grid_content_description"><xliff:g name="num_cols" example="1">%1$d</xliff:g> by <xliff:g name="num_rows" example="1">%2$d</xliff:g></string>
+ 
+diff --git a/src/com/android/customization/model/grid/DefaultShapeGridManager.kt b/src/com/android/customization/model/grid/DefaultShapeGridManager.kt
+index c3dd72ec..f67ccd92 100644
+--- a/src/com/android/customization/model/grid/DefaultShapeGridManager.kt
++++ b/src/com/android/customization/model/grid/DefaultShapeGridManager.kt
+@@ -125,9 +125,9 @@ constructor(
+                                 val cols = cursor.getInt(cursor.getColumnIndex(COL_COLS))
+                                 val backUpTitle =
+                                     context.getString(
+-                                        com.android.themepicker.R.string.grid_title_pattern,
+-                                        cols,
++                                        com.android.themepicker.R.string.grid_title_rows_cols,
+                                         rows,
++                                        cols,
+                                     )
+                                 val title =
+                                     cursor.getColumnIndex(COL_GRID_TITLE).let { titleIndex ->
+@@ -181,7 +181,8 @@ constructor(
+                             list
+                         }
+                     }
+-                    .sortedByDescending { it.rows * it.cols }
++                    // Group by rows, then columns, so the list reads 3x5..3x10, 4x5..4x10, ...
++                    .sortedWith(compareBy({ it.rows }, { it.cols }))
+             } ?: emptyList()
+     }
+ 
+diff --git a/src/com/android/customization/picker/grid/ui/binder/GridFloatingSheetBinder.kt b/src/com/android/customization/picker/grid/ui/binder/GridFloatingSheetBinder.kt
+index e120d2d6..78c70ab1 100644
+--- a/src/com/android/customization/picker/grid/ui/binder/GridFloatingSheetBinder.kt
++++ b/src/com/android/customization/picker/grid/ui/binder/GridFloatingSheetBinder.kt
+@@ -17,6 +17,7 @@
+ package com.android.customization.picker.grid.ui.binder
+ 
+ import android.content.Context
++import android.graphics.Rect
+ import android.graphics.drawable.Drawable
+ import android.view.View
+ import android.view.ViewGroup
+@@ -26,9 +27,9 @@ import androidx.lifecycle.Lifecycle
+ import androidx.lifecycle.LifecycleOwner
+ import androidx.lifecycle.lifecycleScope
+ import androidx.lifecycle.repeatOnLifecycle
++import androidx.recyclerview.widget.GridLayoutManager
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+-import com.android.customization.picker.common.ui.view.SingleRowListItemSpacing
+ import com.android.themepicker.R
+ import com.android.wallpaper.customization.ui.util.ThemePickerCustomizationOptionUtil.ThemePickerHomeCustomizationOption.GRID
+ import com.android.wallpaper.customization.ui.viewmodel.ThemePickerCustomizationOptionsViewModel
+@@ -134,21 +135,37 @@ object GridFloatingSheetBinder {
+         context: Context,
+         adapter: OptionItemAdapter2<Drawable>,
+     ) {
+-        apply {
+-            this.layoutManager = LinearLayoutManager(context, RecyclerView.HORIZONTAL, false)
+-            addItemDecoration(
+-                SingleRowListItemSpacing(
+-                    edgeItemSpacePx =
+-                        context.resources.getDimensionPixelSize(
+-                            R.dimen.floating_sheet_content_horizontal_padding
+-                        ),
+-                    itemHorizontalSpacePx =
+-                        context.resources.getDimensionPixelSize(
+-                            R.dimen.floating_sheet_grid_list_item_horizontal_space
+-                        ),
+-                )
++        val edgeSpacePx =
++            context.resources.getDimensionPixelSize(
++                R.dimen.floating_sheet_content_horizontal_padding
+             )
++        val itemSpacePx =
++            context.resources.getDimensionPixelSize(
++                R.dimen.floating_sheet_grid_list_item_horizontal_space
++            )
++        apply {
++            // With the extra grid sizes the list no longer fits in one row, so lay it out as two
++            // rows scrolling horizontally instead of a single very long strip.
++            this.layoutManager = GridLayoutManager(context, GRID_LIST_ROWS, RecyclerView.HORIZONTAL, false)
++            setPadding(edgeSpacePx, 0, edgeSpacePx, 0)
++            addItemDecoration(UniformHorizontalSpacing(itemSpacePx / 2))
+             this.adapter = adapter
+         }
+     }
++
++    private const val GRID_LIST_ROWS = 2
++
++    /** Half the space on each side, so neighbouring columns keep a constant gap. */
++    private class UniformHorizontalSpacing(private val halfSpacePx: Int) :
++        RecyclerView.ItemDecoration() {
++        override fun getItemOffsets(
++            outRect: Rect,
++            view: View,
++            parent: RecyclerView,
++            state: RecyclerView.State,
++        ) {
++            outRect.left = halfSpacePx
++            outRect.right = halfSpacePx
++        }
++    }
+ }

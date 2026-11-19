@@ -1,0 +1,29 @@
+diff --git a/src/com/android/phone/CarrierConfigLoader.java b/src/com/android/phone/CarrierConfigLoader.java
+index 4d77c7901..3baeb9088 100644
+--- a/src/com/android/phone/CarrierConfigLoader.java
++++ b/src/com/android/phone/CarrierConfigLoader.java
+@@ -1290,13 +1290,22 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
+         return "carrierconfig-" + packageName + "-" + "nosim" + ".xml";
+     }
+ 
+-    /** Return the current version code of a package, or null if the name is not found. */
++    /**
++     * Return the current version code of a package, or null if the name is not found.
++     *
++     * [cannon] 版本号里拼上 ro.build.date.utc。运营商配置会持久化缓存到
++     * /data/user_de/0/com.android.phone/files/carrierconfig-*.xml，只有版本号不一致时才
++     * 会丢掉缓存重新从 assets 读取。ROM 里改 carrier_config_*.xml 时 versionCode 不会变
++     * （一直是 1），刷入后仍会恢复旧缓存，改动完全看不到效果。带上构建时间后，每次出新包
++     * 都会重新加载一次配置。
++     */
+     @Nullable
+     private String getPackageVersion(@NonNull String packageName) {
+         try {
+             PackageInfo info = mContext.getPackageManager().getPackageInfoAsUser(packageName, 0,
+                     ActivityManager.getCurrentUser());
+-            return Long.toString(info.getLongVersionCode());
++            return info.getLongVersionCode() + "-"
++                    + SystemProperties.get("ro.build.date.utc", "0");
+         } catch (PackageManager.NameNotFoundException e) {
+             return null;
+         }

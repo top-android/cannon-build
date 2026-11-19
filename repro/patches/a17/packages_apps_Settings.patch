@@ -1,3 +1,110 @@
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index e45bc1b..1b533ce 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -24,6 +24,9 @@
+     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
++    <!-- [cannon] "更多默认应用"页用 addPreferredActivity 指定图片/音乐/视频/文档的默认应用。
++         该权限是 signature|installer|verifier，Settings 是 platform 签名，直接可得。 -->
++    <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" />
+     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+     <uses-permission android:name="android.permission.DEVICE_POWER" />
+     <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" />
+@@ -2035,6 +2038,20 @@
+                        android:value="@string/menu_key_apps"/>
+         </activity>
+ 
++        <!-- [cannon] "默认应用"页（PermissionController）里的"更多默认应用"入口。
++             该页只列 RoleManager 的 role，图片/音乐/视频/文档不是 role，
++             只能在这里用 PreferredActivity 指定。PermissionController 只在
++             com.android.settings 声明了该 action 时才显示这一行。 -->
++        <activity
++            android:name=".applications.moredefaults.MoreDefaultAppsActivity"
++            android:exported="true"
++            android:label="@string/more_default_apps_title">
++            <intent-filter>
++                <action android:name="android.settings.MANAGE_MORE_DEFAULT_APPS_SETTINGS" />
++                <category android:name="android.intent.category.DEFAULT" />
++            </intent-filter>
++        </activity>
++
+         <activity android:name="Settings$AppMemoryUsageActivity"
+                   android:label="@string/app_list_memory_use"
+                   android:exported="true"
+diff --git a/res/layout/more_default_apps_row.xml b/res/layout/more_default_apps_row.xml
+new file mode 100644
+index 0000000..b7679a7
+--- /dev/null
++++ b/res/layout/more_default_apps_row.xml
+@@ -0,0 +1,43 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++  [cannon] "更多默认应用"列表行：图标 + 分类名 + 当前默认应用。
++-->
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:minHeight="72dp"
++    android:orientation="horizontal"
++    android:gravity="center_vertical"
++    android:paddingStart="24dp"
++    android:paddingEnd="24dp"
++    android:paddingTop="10dp"
++    android:paddingBottom="10dp">
++
++    <ImageView
++        android:id="@+id/icon"
++        android:layout_width="40dp"
++        android:layout_height="40dp"
++        android:layout_marginEnd="20dp"
++        android:importantForAccessibility="no" />
++
++    <LinearLayout
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:orientation="vertical">
++
++        <TextView
++            android:id="@+id/title"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:textAppearance="?android:attr/textAppearanceListItem" />
++
++        <TextView
++            android:id="@+id/summary"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:textAppearance="?android:attr/textAppearanceListItemSecondary"
++            android:ellipsize="end"
++            android:maxLines="1" />
++    </LinearLayout>
++</LinearLayout>
+diff --git a/res/values-zh-rCN/strings_more_default_apps.xml b/res/values-zh-rCN/strings_more_default_apps.xml
+new file mode 100644
+index 0000000..16fd51f
+--- /dev/null
++++ b/res/values-zh-rCN/strings_more_default_apps.xml
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="more_default_apps_title">更多默认应用</string>
++    <string name="more_default_apps_images">图片</string>
++    <string name="more_default_apps_audio">音乐</string>
++    <string name="more_default_apps_video">视频</string>
++    <string name="more_default_apps_pdf">PDF 文档</string>
++    <string name="more_default_apps_word">Word 文档</string>
++    <string name="more_default_apps_excel">Excel 表格</string>
++    <string name="more_default_apps_powerpoint">PowerPoint 演示文稿</string>
++    <string name="more_default_apps_text">文本文件</string>
++    <string name="more_default_apps_email">邮箱</string>
++    <string name="more_default_apps_none">未设置</string>
++    <string name="more_default_apps_always_ask">每次询问</string>
++    <string name="more_default_apps_none_available">没有应用可以处理这种类型</string>
++    <string name="more_default_apps_failed">设置默认应用失败</string>
++</resources>
 diff --git a/res/values/strings.xml b/res/values/strings.xml
 index a84186b..c1c8116 100644
 --- a/res/values/strings.xml
@@ -27,6 +134,29 @@ index a84186b..c1c8116 100644
      <!-- Title for the instant hotspot state [CHAR LIMIT=NONE]-->
      <string name="wifi_hotspot_instant_title">Instant hotspot</string>
      <!-- Summary text when instant hotspot is turned on -->
+diff --git a/res/values/strings_more_default_apps.xml b/res/values/strings_more_default_apps.xml
+new file mode 100644
+index 0000000..a1f57f8
+--- /dev/null
++++ b/res/values/strings_more_default_apps.xml
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="more_default_apps_title">More default apps</string>
++    <string name="more_default_apps_images">Images</string>
++    <string name="more_default_apps_audio">Music</string>
++    <string name="more_default_apps_video">Video</string>
++    <string name="more_default_apps_pdf">PDF documents</string>
++    <string name="more_default_apps_word">Word documents</string>
++    <string name="more_default_apps_excel">Excel spreadsheets</string>
++    <string name="more_default_apps_powerpoint">PowerPoint presentations</string>
++    <string name="more_default_apps_text">Text files</string>
++    <string name="more_default_apps_email">Email</string>
++    <string name="more_default_apps_none">Not set</string>
++    <string name="more_default_apps_always_ask">Ask every time</string>
++    <string name="more_default_apps_none_available">No app can handle this type</string>
++    <string name="more_default_apps_failed">Couldn\'t set default app</string>
++</resources>
 diff --git a/res/xml/wifi_tether_settings.xml b/res/xml/wifi_tether_settings.xml
 index 4924bf9..241622d 100644
 --- a/res/xml/wifi_tether_settings.xml
@@ -44,6 +174,525 @@ index 4924bf9..241622d 100644
      <Preference
          android:key="wifi_hotspot_instant"
          android:title="@string/wifi_hotspot_instant_title"
+diff --git a/src/com/android/settings/applications/moredefaults/MoreDefaultAppsActivity.java b/src/com/android/settings/applications/moredefaults/MoreDefaultAppsActivity.java
+new file mode 100644
+index 0000000..3724a27
+--- /dev/null
++++ b/src/com/android/settings/applications/moredefaults/MoreDefaultAppsActivity.java
+@@ -0,0 +1,513 @@
++/*
++ * Copyright (C) 2026 The LineageOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.applications.moredefaults;
++
++import android.app.Activity;
++import android.app.AlertDialog;
++import android.content.ComponentName;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.content.pm.PackageManager;
++import android.content.pm.ResolveInfo;
++import android.graphics.drawable.Drawable;
++import android.net.Uri;
++import android.os.Bundle;
++import android.view.LayoutInflater;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.AdapterView;
++import android.widget.BaseAdapter;
++import android.widget.ImageView;
++import android.widget.ListView;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import com.android.settings.R;
++
++import java.util.ArrayList;
++import java.util.Iterator;
++import java.util.LinkedHashMap;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++
++/**
++ * "更多默认应用"：图片 / 音乐 / 视频 / PDF / Word / Excel / PPT / 文本 / 邮箱。
++ *
++ * <p>AOSP 的"默认应用"页只列 RoleManager 里的 role（电话、信息、浏览器、桌面），
++ * 这些媒体/文档类型没有对应的 role，只能靠 PreferredActivity 指定。ColorOS/MIUI
++ * 是在自己的 PermissionController 里把这类分类铺出来的；AOSP 给 OEM 留的钩子是
++ * {@link android.provider.Settings#ACTION_MANAGE_MORE_DEFAULT_APPS_SETTINGS} ——
++ * PermissionController 只在 com.android.settings 声明了这个 action 时才显示入口，
++ * 所以这里实现它。
++ */
++public class MoreDefaultAppsActivity extends Activity implements AdapterView.OnItemClickListener {
++
++    /**
++     * 一个分类：action + 一个或多个 MIME，或者 action + scheme（mailto）。
++     *
++     * @param mimes 写进 PreferredActivity 过滤器的类型，图片/音乐/视频用通配的 image/* 等
++     * @param probeTypes 具体类型，用来问系统"打开这种文件会起谁"。判断当前默认必须用具体类型：
++     *     用户从系统选择器里设的默认是按 image/png、video/mp4 这种精确类型存的。
++     */
++    private static final class Category {
++        final int titleRes;
++        final String action;
++        final String[] mimes;
++        final String[] probeTypes;
++        final String scheme;
++
++        Category(int titleRes, String action, String[] mimes, String[] probeTypes, String scheme) {
++            this.titleRes = titleRes;
++            this.action = action;
++            this.mimes = mimes;
++            this.probeTypes = probeTypes;
++            this.scheme = scheme;
++        }
++
++        Intent queryIntent() {
++            final Intent intent = new Intent(action);
++            if (mimes != null && mimes.length > 0) {
++                intent.setType(mimes[0]);
++            } else if (scheme != null) {
++                intent.setData(Uri.parse(scheme));
++            }
++            return intent;
++        }
++
++        IntentFilter buildFilter() {
++            final IntentFilter filter = new IntentFilter(action);
++            filter.addCategory(Intent.CATEGORY_DEFAULT);
++            if (mimes != null) {
++                for (String mime : mimes) {
++                    try {
++                        filter.addDataType(mime);
++                    } catch (IntentFilter.MalformedMimeTypeException e) {
++                        // 常量写错了才会走到这里，忽略该类型
++                    }
++                }
++            } else if (scheme != null) {
++                filter.addDataScheme(scheme);
++            }
++            return filter;
++        }
++
++        int matchCategory() {
++            return (mimes != null && mimes.length > 0)
++                    ? IntentFilter.MATCH_CATEGORY_TYPE
++                    : IntentFilter.MATCH_CATEGORY_SCHEME;
++        }
++    }
++
++    private static final Category[] CATEGORIES = new Category[] {
++            new Category(R.string.more_default_apps_images, Intent.ACTION_VIEW,
++                    new String[] {"image/*"},
++                    new String[] {"image/jpeg", "image/png", "image/webp"}, null),
++            new Category(R.string.more_default_apps_audio, Intent.ACTION_VIEW,
++                    new String[] {"audio/*"},
++                    new String[] {"audio/mpeg", "audio/flac", "audio/ogg"}, null),
++            new Category(R.string.more_default_apps_video, Intent.ACTION_VIEW,
++                    new String[] {"video/*"},
++                    new String[] {"video/mp4", "video/x-matroska", "video/webm"}, null),
++            new Category(R.string.more_default_apps_pdf, Intent.ACTION_VIEW,
++                    new String[] {"application/pdf"},
++                    new String[] {"application/pdf"}, null),
++            new Category(R.string.more_default_apps_word, Intent.ACTION_VIEW,
++                    new String[] {
++                            "application/msword",
++                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
++                    },
++                    new String[] {
++                            "application/msword",
++                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
++                    }, null),
++            new Category(R.string.more_default_apps_excel, Intent.ACTION_VIEW,
++                    new String[] {
++                            "application/vnd.ms-excel",
++                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
++                    },
++                    new String[] {
++                            "application/vnd.ms-excel",
++                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
++                    }, null),
++            new Category(R.string.more_default_apps_powerpoint, Intent.ACTION_VIEW,
++                    new String[] {
++                            "application/vnd.ms-powerpoint",
++                            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
++                    },
++                    new String[] {
++                            "application/vnd.ms-powerpoint",
++                            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
++                    }, null),
++            new Category(R.string.more_default_apps_text, Intent.ACTION_VIEW,
++                    new String[] {"text/plain"}, new String[] {"text/plain"}, null),
++            new Category(R.string.more_default_apps_email,
++                    Intent.ACTION_SENDTO, null, null, "mailto"),
++    };
++
++    private ListView mList;
++    private RowAdapter mAdapter;
++    private final ResolveInfo[] mCurrent = new ResolveInfo[CATEGORIES.length];
++    private boolean mCurrentValid;
++    private final List<IntentFilter> mPreferredFilters = new ArrayList<>();
++    private boolean mPreferredLoaded;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        setTitle(R.string.more_default_apps_title);
++
++        mList = new ListView(this);
++        mList.setId(android.R.id.list);
++        mList.setOnItemClickListener(this);
++        mAdapter = new RowAdapter();
++        mList.setAdapter(mAdapter);
++        setContentView(mList);
++    }
++
++    @Override
++    protected void onResume() {
++        super.onResume();
++        invalidateCurrent();
++        mAdapter.notifyDataSetChanged();
++    }
++
++    @Override
++    public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
++        showPicker(position);
++    }
++
++    /**
++     * 探测用的 data URI。很多应用（相册、文件管理器、第三方播放器）的过滤器要求带 scheme，
++     * 只按 MIME 查会漏掉它们，候选列表和"当前默认"都会不准。
++     */
++    private static final String[] PROBE_URIS = {
++            "content://media/external/file/1",
++            "file:///sdcard/probe",
++    };
++
++    /** 系统选择器（ResolverActivity 的别名），"每次询问"写进去的占位记录指向它。 */
++    private static final String RESOLVER_PACKAGE = "android";
++    private static final String RESOLVER_CLASS = "com.android.internal.app.ResolverActivity";
++
++    /**
++     * 该分类对应的探测意图（具体类型 × scheme 的组合）。
++     *
++     * 只用"带 data 的具体类型"探测：应用真正能打开一个文件，靠的就是这种意图。
++     * 不要补不带 data 的通配类型查询——某些应用（例如 MX 播放器的音频入口）只声明了
++     * mimeType 却没有 scheme，只有不带 data 的意图能匹配到它，实际打开文件时系统根本不会
++     * 把它列进选择器，选中它也无法成为默认，列表里就会多出一个点了没反应的应用。
++     */
++    private List<Intent> buildProbes(Category category) {
++        final List<Intent> probes = new ArrayList<>();
++        if (category.mimes == null) {
++            probes.add(category.queryIntent());
++            return probes;
++        }
++        for (String type : category.probeTypes) {
++            for (String uri : PROBE_URIS) {
++                final Intent intent = new Intent(category.action);
++                intent.setDataAndType(Uri.parse(uri), type);
++                probes.add(intent);
++            }
++        }
++        return probes;
++    }
++
++    /** 返回能处理该分类的应用（按包去重，保持优先级顺序）。 */
++    private List<ResolveInfo> queryCandidates(Category category) {
++        final PackageManager pm = getPackageManager();
++        final Map<String, ResolveInfo> unique = new LinkedHashMap<>();
++        for (Intent probe : buildProbes(category)) {
++            for (ResolveInfo info : pm.queryIntentActivities(
++                    probe, PackageManager.MATCH_DEFAULT_ONLY)) {
++                // 同一个包可能有多个 Activity 处理同一类型（MX 播放器就有两个），
++                // 列表里只留优先级最高的那个，否则会出现两条一模一样的条目。
++                unique.putIfAbsent(info.activityInfo.packageName, info);
++            }
++        }
++        return new ArrayList<>(unique.values());
++    }
++
++    /** 没有设默认时系统返回的是选择器，这不算"已设置默认"。 */
++    private static boolean isResolver(ResolveInfo info) {
++        if (info == null || info.activityInfo == null) {
++            return true;
++        }
++        final String pkg = info.activityInfo.packageName;
++        return "android".equals(pkg) || "com.android.intentresolver".equals(pkg);
++    }
++
++    /**
++     * 当前默认应用。判断依据是系统里真实存在的 PreferredActivity，而不是"解析出来是谁"：
++     * 没设默认时系统会返回唯一能处理它的应用或"最佳匹配"，看起来都像设了默认。
++     */
++    private ResolveInfo resolveCurrent(Category category) {
++        if (!hasPreferredActivity(category)) {
++            return null;
++        }
++        // 确实设过默认，再按真实打开的方式解析一次，拿到最终生效的那个组件
++        // （可能有多条重叠的默认，比如 video/mp4 -> A 和 video/* -> B）。
++        final PackageManager pm = getPackageManager();
++        for (Intent probe : buildProbes(category)) {
++            final ResolveInfo info = pm.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY);
++            if (!isResolver(info)) {
++                return info;
++            }
++        }
++        return null;
++    }
++
++    /** 拉一次系统里所有"始终"记录，判断某分类有没有被设过默认。 */
++    @SuppressWarnings("deprecation")
++    private void loadPreferredActivities() {
++        if (mPreferredLoaded) {
++            return;
++        }
++        mPreferredFilters.clear();
++        final List<ComponentName> activities = new ArrayList<>();
++        try {
++            getPackageManager().getPreferredActivities(mPreferredFilters, activities, null);
++        } catch (RuntimeException e) {
++            // 拿不到就当作没有默认，页面会显示"未设置"
++        }
++        // 去掉"每次询问"写进去的占位记录：它指向系统选择器，不代表真的设了默认
++        for (int i = mPreferredFilters.size() - 1; i >= 0; i--) {
++            final ComponentName activity = i < activities.size() ? activities.get(i) : null;
++            if (activity != null && RESOLVER_PACKAGE.equals(activity.getPackageName())) {
++                mPreferredFilters.remove(i);
++            }
++        }
++        mPreferredLoaded = true;
++    }
++
++    private boolean hasPreferredActivity(Category category) {
++        loadPreferredActivities();
++        for (IntentFilter filter : mPreferredFilters) {
++            if (filterCovers(filter, category)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    /** 这条"始终"记录是否覆盖该分类。 */
++    private static boolean filterCovers(IntentFilter filter, Category category) {
++        if (!filter.hasAction(category.action)) {
++            return false;
++        }
++        if (category.mimes == null) {
++            return category.scheme != null && filter.hasDataScheme(category.scheme);
++        }
++        final Iterator<String> types = filter.typesIterator();
++        if (types == null) {
++            return false;
++        }
++        while (types.hasNext()) {
++            final String stored = types.next();
++            for (String mime : category.mimes) {
++                if (typeMatches(stored, mime)) {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++
++    /**
++     * 过滤器和分类的类型是否覆盖同一批文件。通配类型在 IntentFilter 里存成 "video"（不带 /*），
++     * 精确类型存成 "video/mp4"。
++     */
++    private static boolean typeMatches(String stored, String wanted) {
++        if (!baseType(stored).equals(baseType(wanted))) {
++            return false;
++        }
++        return !stored.contains("/") || !wanted.contains("/") || stored.equals(wanted);
++    }
++
++    private static String baseType(String type) {
++        final int slash = type.indexOf('/');
++        return slash < 0 ? type : type.substring(0, slash);
++    }
++
++    /** 每行都要问一次，缓存起来，免得列表刷新时反复 IPC。 */
++    private ResolveInfo current(int index) {
++        if (!mCurrentValid) {
++            for (int i = 0; i < CATEGORIES.length; i++) {
++                mCurrent[i] = resolveCurrent(CATEGORIES[i]);
++            }
++            mCurrentValid = true;
++        }
++        return mCurrent[index];
++    }
++
++    private void invalidateCurrent() {
++        mCurrentValid = false;
++        mPreferredLoaded = false;
++    }
++
++    private void showPicker(int index) {
++        final Category category = CATEGORIES[index];
++        final PackageManager pm = getPackageManager();
++        final List<ResolveInfo> candidates = queryCandidates(category);
++        if (candidates.isEmpty()) {
++            Toast.makeText(this, R.string.more_default_apps_none_available,
++                    Toast.LENGTH_SHORT).show();
++            return;
++        }
++
++        final ResolveInfo current = current(index);
++        final String currentPackage = current == null ? null : current.activityInfo.packageName;
++
++        // 0 号是"每次询问"，后面依次是候选应用
++        final CharSequence[] labels = new CharSequence[candidates.size() + 1];
++        labels[0] = getString(R.string.more_default_apps_always_ask);
++        int checked = 0;
++        for (int i = 0; i < candidates.size(); i++) {
++            final ResolveInfo info = candidates.get(i);
++            labels[i + 1] = info.loadLabel(pm);
++            // 按包名比对：同一个包可能有多个 Activity，命中的未必是列表里留下的那个。
++            if (currentPackage != null
++                    && currentPackage.equals(info.activityInfo.packageName)) {
++                checked = i + 1;
++            }
++        }
++
++        new AlertDialog.Builder(this)
++                .setTitle(category.titleRes)
++                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
++                    dialog.dismiss();
++                    if (which == 0) {
++                        clearDefault(category, candidates);
++                    } else {
++                        setDefault(category, candidates, candidates.get(which - 1));
++                    }
++                    invalidateCurrent();
++                    mAdapter.notifyDataSetChanged();
++                })
++                .setNegativeButton(android.R.string.cancel, null)
++                .show();
++    }
++
++    @SuppressWarnings("deprecation")
++    private void setDefault(Category category, List<ResolveInfo> candidates, ResolveInfo chosen) {
++        final ComponentName[] set = new ComponentName[candidates.size()];
++        for (int i = 0; i < candidates.size(); i++) {
++            set[i] = new ComponentName(candidates.get(i).activityInfo.packageName,
++                    candidates.get(i).activityInfo.name);
++        }
++        final ComponentName activity = new ComponentName(
++                chosen.activityInfo.packageName, chosen.activityInfo.name);
++        try {
++            getPackageManager().addPreferredActivity(
++                    category.buildFilter(), category.matchCategory(), set, activity);
++        } catch (RuntimeException e) {
++            Toast.makeText(this, R.string.more_default_apps_failed, Toast.LENGTH_SHORT).show();
++        }
++    }
++
++    /**
++     * "每次询问"：给本分类写一条指向系统选择器的首选活动。
++     *
++     * PMS 添加"始终"记录时会先删掉与本分类重叠的旧默认，而选择器本身不是这类文件的处理者，
++     * 这条记录不会被真正采用，效果就是每次都弹选择器。这样不会像
++     * clearPackagePreferredActivities 那样把该包在别的分类（视频、pdf、word……）里的默认一起
++     * 清掉——MT 管理器这类应用同时是好几个分类的默认，按包清就会出现"清音乐把文档也清了"。
++     */
++    @SuppressWarnings("deprecation")
++    private void clearDefault(Category category, List<ResolveInfo> candidates) {
++        if (category.mimes == null) {
++            // 只有 scheme 的分类（mailto）没有 data type，用不了上面的办法，退回按包清
++            clearByPackage(category, candidates);
++            return;
++        }
++        final ComponentName resolver = new ComponentName(RESOLVER_PACKAGE, RESOLVER_CLASS);
++        try {
++            getPackageManager().addPreferredActivity(
++                    category.buildFilter(), category.matchCategory(),
++                    new ComponentName[] {resolver}, resolver);
++        } catch (RuntimeException e) {
++            Toast.makeText(this, R.string.more_default_apps_failed, Toast.LENGTH_SHORT).show();
++        }
++    }
++
++    /** 按包清空默认。只用于没有 data type 的分类，见 {@link #clearDefault}。 */
++    @SuppressWarnings("deprecation")
++    private void clearByPackage(Category category, List<ResolveInfo> candidates) {
++        final PackageManager pm = getPackageManager();
++        final Set<String> packages = new LinkedHashSet<>();
++        for (ResolveInfo info : candidates) {
++            packages.add(info.activityInfo.packageName);
++        }
++        // 真正生效的默认未必在候选里（比如只声明了某个 scheme 的包），一并清掉
++        final ResolveInfo current = resolveCurrent(category);
++        if (current != null) {
++            packages.add(current.activityInfo.packageName);
++        }
++        for (String pkg : packages) {
++            try {
++                pm.clearPackagePreferredActivities(pkg);
++            } catch (RuntimeException e) {
++                // 忽略：个别包没有权限清也不影响其它包
++            }
++        }
++    }
++
++    private final class RowAdapter extends BaseAdapter {
++        private final LayoutInflater mInflater = LayoutInflater.from(MoreDefaultAppsActivity.this);
++
++        @Override
++        public int getCount() {
++            return CATEGORIES.length;
++        }
++
++        @Override
++        public Object getItem(int position) {
++            return CATEGORIES[position];
++        }
++
++        @Override
++        public long getItemId(int position) {
++            return position;
++        }
++
++        @Override
++        public View getView(int position, View convertView, ViewGroup parent) {
++            View view = convertView;
++            if (view == null) {
++                view = mInflater.inflate(R.layout.more_default_apps_row, parent, false);
++            }
++            final Category category = CATEGORIES[position];
++            final ResolveInfo current = current(position);
++            final TextView title = view.findViewById(R.id.title);
++            final TextView summary = view.findViewById(R.id.summary);
++            final ImageView icon = view.findViewById(R.id.icon);
++
++            title.setText(category.titleRes);
++            if (current != null) {
++                summary.setText(current.loadLabel(getPackageManager()));
++                final Drawable drawable = current.loadIcon(getPackageManager());
++                icon.setImageDrawable(drawable);
++            } else {
++                summary.setText(R.string.more_default_apps_none);
++                icon.setImageResource(android.R.drawable.sym_def_app_icon);
++            }
++            return view;
++        }
++    }
++}
 diff --git a/src/com/android/settings/wifi/tether/WifiTetherSettings.java b/src/com/android/settings/wifi/tether/WifiTetherSettings.java
 index 1c5a908..2032cb7 100644
 --- a/src/com/android/settings/wifi/tether/WifiTetherSettings.java

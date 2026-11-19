@@ -1,12 +1,73 @@
 diff --git a/cannon-vendor.mk b/cannon-vendor.mk
-index 255ccdf..955dbba 100644
+index 295063a..60f0a2a 100644
 --- a/cannon-vendor.mk
 +++ b/cannon-vendor.mk
-@@ -1531,7 +1531,6 @@ PRODUCT_COPY_FILES += \
-     vendor/xiaomi/cannon/proprietary/vendor/bin/dumpsys:$(TARGET_COPY_OUT_VENDOR)/bin/dumpsys \
-     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.audio.service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.audio.service \
-     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.3-service.xiaomi:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.biometrics.fingerprint@2.3-service.xiaomi \
--    vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.cas@1.2-service-lazy:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.cas@1.2-service-lazy \
-     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.drm-service.clearkey:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.drm-service.clearkey \
-     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.gatekeeper@1.0-service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.gatekeeper@1.0-service \
-     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.graphics.composer@2.1-service:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.graphics.composer@2.1-service \
+@@ -5,6 +5,10 @@
+ PRODUCT_SOONG_NAMESPACES += \
+     vendor/xiaomi/cannon
+ 
++# [cannon] android.hardware.gnss-service.mediatek 这个 blob 已从下面的拷贝列表移除：
++# GNSS HAL 换成自写的 AIDL 前端（device/xiaomi/cannon/gnss_aidl），
++# 由 android.hardware.gnss-service.cannon 用同名 stem 安装到同一路径。
++# 注意：列表是续行结构，注释不能插在中间，否则会把后面所有条目一起注释掉。
+ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/system/bin/vtservice:$(TARGET_COPY_OUT_SYSTEM)/bin/vtservice \
+     vendor/xiaomi/cannon/proprietary/system/etc/init/init.vtservice.rc:$(TARGET_COPY_OUT_SYSTEM)/etc/init/init.vtservice.rc \
+@@ -51,7 +55,6 @@ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/gsm0710muxd:$(TARGET_COPY_OUT_VENDOR)/bin/gsm0710muxd \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.bluetooth@1.1-service-mediatek:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.bluetooth@1.1-service-mediatek \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.drm@1.4-service.widevine:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.drm@1.4-service.widevine \
+-    vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.gnss-service.mediatek:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.gnss-service.mediatek \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.graphics.allocator@4.0-service-mediatek:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.graphics.allocator@4.0-service-mediatek \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.keymaster@4.1-service.beanpod:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.keymaster@4.1-service.beanpod \
+     vendor/xiaomi/cannon/proprietary/vendor/bin/hw/android.hardware.media.c2@1.2-mediatek:$(TARGET_COPY_OUT_VENDOR)/bin/hw/android.hardware.media.c2@1.2-mediatek \
+@@ -1051,7 +1054,6 @@ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libcmdl_ndk.mtk.vndk.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcmdl_ndk.mtk.vndk.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_hidl@1.1.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_hidl@1.1.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_hidl@1.2.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_hidl@1.2.so \
+-    vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_hidl_plugin.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_hidl_plugin.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_mtk_c2store.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_mtk_c2store.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_mtk_vdec.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_mtk_vdec.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_mtk_venc.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_mtk_venc.so \
+@@ -1741,7 +1743,6 @@ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libssl.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libssl.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libstagefright_aidl_bufferpool2.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libstagefright_aidl_bufferpool2.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libstagefright_bufferpool@2.0.1.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libstagefright_bufferpool@2.0.1.so \
+-    vendor/xiaomi/cannon/proprietary/vendor/lib64/libstagefright_foundation.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libstagefright_foundation.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libstagefright_softomx_plugin.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libstagefright_softomx_plugin.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libstagefright_softomx.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libstagefright_softomx.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libtextclassifier_hash.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libtextclassifier_hash.so \
+@@ -1997,7 +1998,6 @@ PRODUCT_COPY_FILES += \
+ # 症状: 所有媒体解码走软解, 打开/播放/拖进度条 2-4s 延迟。
+ PRODUCT_COPY_FILES += \
+     vendor/xiaomi/cannon/proprietary/vendor/etc/init/android.hardware.media.c2@1.2-mediatek.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/android.hardware.media.c2@1.2-mediatek.rc \
+-    vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_vndk.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_vndk.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib64/libcodec2_hidl@1.0.so:$(TARGET_COPY_OUT_VENDOR)/lib64/libcodec2_hidl@1.0.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib/libcodec2_vndk.so:$(TARGET_COPY_OUT_VENDOR)/lib/libcodec2_vndk.so \
+     vendor/xiaomi/cannon/proprietary/vendor/lib/libcodec2_hidl@1.0.so:$(TARGET_COPY_OUT_VENDOR)/lib/libcodec2_hidl@1.0.so
+diff --git a/proprietary/vendor/etc/init/android.hardware.media.c2@1.2-mediatek.rc b/proprietary/vendor/etc/init/android.hardware.media.c2@1.2-mediatek.rc
+index 8c51f2f..633ad4e 100644
+--- a/proprietary/vendor/etc/init/android.hardware.media.c2@1.2-mediatek.rc
++++ b/proprietary/vendor/etc/init/android.hardware.media.c2@1.2-mediatek.rc
+@@ -4,4 +4,7 @@ service android-hardware-media-c2-hal-1-2 /vendor/bin/hw/android.hardware.media.
+     group camera drmrpc mediadrm media_rw sdcard_rw media system audio inet net_bt net_bt_admin net_bw_acct sdcard_r
+     ioprio rt 4
+     writepid /dev/cpuset/foreground/tasks
++    # cannon: this 32-bit HAL needs pre-A17 GraphicBufferMapper::lock (6 args).
++    # A17 linker dropped TARGET_LD_SHIM_LIBS, so preload the shim instead.
++    setenv LD_PRELOAD /vendor/lib/libshim_gbm_only.so
+ 
+diff --git a/proprietary/vendor/etc/init/em_hidl_user.rc b/proprietary/vendor/etc/init/em_hidl_user.rc
+index f4fc513..c8df55f 100644
+--- a/proprietary/vendor/etc/init/em_hidl_user.rc
++++ b/proprietary/vendor/etc/init/em_hidl_user.rc
+@@ -11,3 +11,9 @@ service emhidl_user /vendor/bin/em_hidl
+     disabled
+     user system
+     group bluetooth radio gps system nfc
++
++# cannon: 本服务是 disabled，全树原本没有任何 trigger 显式 start 它，
++# 导致 vendor.mediatek.hardware.engineermode@1.x::IEmd 永不注册；
++# 走 EmUtils.getEmHidlService() 的 EM 菜单会在 onCreate 阻塞 5 s 后 ANR。
++on property:sys.boot_completed=1
++    start emhidl_user
