@@ -108,6 +108,36 @@ case "${1:-}" in
     build|module|all) check_variant_switch "$@" ;;
 esac
 
+# [cannon][A17][2026-11-21] 内核版本串固定为 #1。
+# UTS_VERSION 是 "#<N>"，N 来自 $(KERNEL_OUT)/.version（scripts/mkcompile_h 原样读取，
+# 不递增）。build.sh 里那句 export KBUILD_BUILD_VERSION=1 传不进 kati 生成的 ninja
+# 命令，实测无效——out-user 的内核一直是 #2 / #3。这里直接改 .version，并删掉已生成的
+# 内核镜像逼 ninja 重跑内核 make；compile.h 是 FORCE 规则，跑一次就按新值重生成。
+pin_kernel_version() {
+    local ko img
+    ko=$(ls -d "$OUT_DIR"/target/product/*/obj/KERNEL_OBJ 2>/dev/null | head -1)
+    [ -n "${ko:-}" ] || { warn "[kernel] 没有 KERNEL_OBJ，跳过 #1 固定"; return 0; }
+    if [ "$(cat "$ko/.version" 2>/dev/null)" = "1" ] &&
+       grep -q '"#1 ' "$ko/include/generated/compile.h" 2>/dev/null; then
+        echo "[kernel] 版本串已是 #1，跳过"
+        return 0
+    fi
+    echo 1 > "$ko/.version"
+    rm -f "$ko/include/generated/compile.h"
+    for img in "$ko"/arch/*/boot/Image.gz "$ko"/arch/*/boot/Image.gz-dtb \
+               "$ko"/arch/*/boot/zImage "$ko"/arch/*/boot/zImage-dtb; do
+        [ -f "$img" ] && rm -f "$img"
+    done
+    echo "[kernel] 版本串固定为 #1，已删掉内核镜像触发重编"
+}
+
+case "${1:-}" in
+    build|all) pin_kernel_version ;;
+    module) case "${2:-}" in
+                *boot*|*kernel*|bacon) pin_kernel_version ;;
+            esac ;;
+esac
+
 if [ "$CANNON_VARIANT" != "userdebug" ]; then
     warn "[提示] 变体=$CANNON_VARIANT；device.mk 里的 eng ADB 属性矩阵（ro.secure=0 / ro.adb.secure=0 / service.adb.root=1）仍会写进 /product/build.prop"
 fi
