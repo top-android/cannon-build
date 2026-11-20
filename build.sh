@@ -117,12 +117,13 @@ repo_bin() {
     fi
 }
 
-# 宿主依赖：缺什么装什么。git-lfs 缺失会让 repo init --git-lfs 拉不到 LFS 文件，
-# 所以统一在 sync/init 前补齐。
-# [cannon] 不装也不启用 ccache（用户明确要求，走 ninja 增量即可）：这里刻意不碰 ccache。
+# 宿主依赖：缺什么装什么。ccache 缺失会让 USE_CCACHE=1 静默失效（全量编译），
+# git-lfs 缺失会让 repo init --git-lfs 拉不到 LFS 文件，所以统一在 sync/init 前补齐，
+# 并把 ccache 缓存目录建好。
 ensure_host_deps() {
     local pkgs=()
     command -v git-lfs >/dev/null 2>&1 || pkgs+=(git-lfs)
+    command -v ccache  >/dev/null 2>&1 || pkgs+=(ccache)
     if [ "${#pkgs[@]}" -gt 0 ]; then
         step "安装缺失的宿主依赖: ${pkgs[*]}"
         if [ "$(id -u)" = "0" ]; then
@@ -134,6 +135,12 @@ ensure_host_deps() {
             c_ylw "非 root，跳过安装；请手动执行: sudo apt install -y ${pkgs[*]}"
         fi
     fi
+    mkdir -p "$CCACHE_DIR" 2>/dev/null || true
+    if [ -w "$CCACHE_DIR" ]; then
+        c_grn "ccache 目录就绪: $CCACHE_DIR"
+    else
+        c_ylw "ccache 目录 $CCACHE_DIR 不可写 —— 本次编译可能无缓存"
+    fi
     return 0
 }
 
@@ -142,9 +149,14 @@ cmd_doctor() {
     local ok=1
 
     command -v git    >/dev/null || { c_red "缺 git"; ok=0; }
-    # [cannon] 不用 ccache，不再检查
+    command -v ccache >/dev/null || { c_ylw "缺 ccache —— 会全量编译"; ok=0; }
     command -v python3 >/dev/null || { c_red "缺 python3"; ok=0; }
     [ -e /usr/bin/python ] || c_ylw "/usr/bin/python 不存在（A14 某些脚本还要它）"
+
+    if command -v ccache >/dev/null; then
+        echo "ccache: $(command -v ccache)"
+        CCACHE_DIR="$CCACHE_DIR" ccache -s 2>/dev/null | sed -n '1,8p' || true
+    fi
 
     local mem_gb swap_gb
     mem_gb=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024 ))
@@ -595,7 +607,9 @@ cmd_build() {
     : > "$LOG"
     cd "$ROM_DIR"
 
-    # [cannon] 不用 ccache（用户要求）：不导出 USE_CCACHE / CCACHE_EXEC，走 ninja 增量。
+    export USE_CCACHE=1
+    export CCACHE_EXEC="$(command -v ccache || true)"
+    export CCACHE_DIR CCACHE_MAXSIZE=50G
     # GOGC 用 Go 默认 100。30 是 27G 内存时代为压低 soong_build 峰值堆设的；
     # 本机 64G，30 只会让 Go runtime 频繁 GC（siso 报 memory stall 500~900ms/s）。
     export GOGC="${GOGC:-100}"
@@ -618,7 +632,7 @@ cmd_build() {
     # ro.build.version.incremental 就变成 eng.root.20261027.103315 这种难看的串
     export BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d)}"
 
-    c_ylw "环境: OUT_DIR=$OUT_DIR GOGC=$GOGC JOBS=$JOBS BUILD_NUMBER=$BUILD_NUMBER SOONG_NINJA=$SOONG_NINJA（不用 ccache）"
+    c_ylw "环境: OUT_DIR=$OUT_DIR CCACHE_DIR=$CCACHE_DIR CCACHE_EXEC=$CCACHE_EXEC GOGC=$GOGC JOBS=$JOBS BUILD_NUMBER=$BUILD_NUMBER SOONG_NINJA=$SOONG_NINJA"
 
     # shellcheck disable=SC1091
     source build/envsetup.sh >/dev/null
@@ -655,7 +669,9 @@ cmd_module() {
     mkdir -p "$(dirname "$LOG")"
     cd "$ROM_DIR"
 
-    # [cannon] 不用 ccache（用户要求）：不导出 USE_CCACHE / CCACHE_EXEC，走 ninja 增量。
+    export USE_CCACHE=1
+    export CCACHE_EXEC="$(command -v ccache || true)"
+    export CCACHE_DIR CCACHE_MAXSIZE=50G
     # GOGC 用 Go 默认 100。30 是 27G 内存时代为压低 soong_build 峰值堆设的；
     # 本机 64G，30 只会让 Go runtime 频繁 GC（siso 报 memory stall 500~900ms/s）。
     export GOGC="${GOGC:-100}"
@@ -667,7 +683,7 @@ cmd_module() {
     export SOONG_NINJA=siso
     export SOONG_INCREMENTAL_ANALYSIS=true
 
-    c_ylw "环境: OUT_DIR=$OUT_DIR GOGC=$GOGC JOBS=$JOBS BUILD_NUMBER=$BUILD_NUMBER（不用 ccache）"
+    c_ylw "环境: OUT_DIR=$OUT_DIR CCACHE_DIR=$CCACHE_DIR CCACHE_EXEC=$CCACHE_EXEC GOGC=$GOGC JOBS=$JOBS BUILD_NUMBER=$BUILD_NUMBER"
 
     # shellcheck disable=SC1091
     source build/envsetup.sh >/dev/null
