@@ -109,10 +109,12 @@ case "${1:-}" in
 esac
 
 # [cannon][A17][2026-11-21] 内核版本串固定为 #1。
-# UTS_VERSION 是 "#<N>"，N 来自 $(KERNEL_OUT)/.version（scripts/mkcompile_h 原样读取，
-# 不递增）。build.sh 里那句 export KBUILD_BUILD_VERSION=1 传不进 kati 生成的 ninja
-# 命令，实测无效——out-user 的内核一直是 #2 / #3。这里直接改 .version，并删掉已生成的
-# 内核镜像逼 ninja 重跑内核 make；compile.h 是 FORCE 规则，跑一次就按新值重生成。
+# UTS_VERSION 是 "#<N>"，N 来自 $(KERNEL_OUT)/.version。真正写这个文件的是
+# scripts/link-vmlinux.sh：.version 不存在时写 1，存在时 mv 成 .old_version 再 +1。
+# 所以只删 .version 不够，必须把 .old_version 一起删，才会走"写 1"的分支。
+# （build.sh 里那句 export KBUILD_BUILD_VERSION=1 传不进 kati 生成的 ninja 命令，
+#   实测无效，out-user 的内核一直是 #2 / #3。）
+# 同时删掉已生成的内核镜像逼 ninja 重跑 vmlinux 链接，否则 .version 不会被重写。
 pin_kernel_version() {
     local ko img
     ko=$(ls -d "$OUT_DIR"/target/product/*/obj/KERNEL_OBJ 2>/dev/null | head -1)
@@ -122,13 +124,12 @@ pin_kernel_version() {
         echo "[kernel] 版本串已是 #1，跳过"
         return 0
     fi
-    echo 1 > "$ko/.version"
-    rm -f "$ko/include/generated/compile.h"
+    rm -f "$ko/.version" "$ko/.old_version" "$ko/include/generated/compile.h"
     for img in "$ko"/arch/*/boot/Image.gz "$ko"/arch/*/boot/Image.gz-dtb \
                "$ko"/arch/*/boot/zImage "$ko"/arch/*/boot/zImage-dtb; do
         [ -f "$img" ] && rm -f "$img"
     done
-    echo "[kernel] 版本串固定为 #1，已删掉内核镜像触发重编"
+    echo "[kernel] 版本串固定为 #1（已删 .version/.old_version 和内核镜像）"
 }
 
 case "${1:-}" in

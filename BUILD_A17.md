@@ -284,3 +284,26 @@ OUT_DIR=/cannon/out-user CANNON_VARIANT=user JOBS=$(nproc) ./build-a17.sh build
 > `onMessageReceived`，vtable `+0x30`/`+0x40` 自适应）+ seccomp/VINTF/sepolicy 放行，
 > 详见 `repro/patches/a17/frameworks_av.patch` 与 `device_xiaomi_cannon.patch`。
 > `media.c2.hal.selection=aidl` 保持不变，HIDL store 仍然不用。
+
+## 2026-11-21 源码状态固化（r2）
+
+- 新清单：`manifests/a17-pinned-2026-11-21-r2.xml`（`PINNED_MANIFEST=latest` 按 mtime 会选中它）
+- 4 个仓更新并推到 `top-android`：
+
+| 仓 | 分支 | commit | 内容 |
+|---|---|---|---|
+| `device/xiaomi/cannon` | lineage-24.0-cannon-hwc2 | `2a42788` | 5G SA 开机下发 AT+E5GOPT=7（`cannon_nropt` + init 服务 + sepolicy）；codec2 `c2.mtk.*` 补 rank=1（硬解/硬编） |
+| `frameworks/opt/telephony` | lineage-24.0-cannon | `492c936` | `debug.cannon.ignore_dcnr_restricted` 调试开关（默认关） |
+| `packages/apps/Updater` | cannon-24.0（新 fork `top-android/android_packages_apps_Updater`） | `d226058` | 更新日志入口 → `git.gitan.top/top-android/releases/releases/latest` |
+| `vendor/apn` | cannon（新 fork `top-android/android_vendor_apn`） | `212c6f0` | 联通 46001 全量 IPV4V6，3gwap 降为 supl，3gnet 作唯一 default |
+
+- 其余 1193 个仓仍钉在 `a17-pinned-2026-11-10.xml` 的 SHA，未变
+- 校验：`scripts/check_a17_pinned.sh manifests/a17-pinned-2026-11-21-r2.xml` → 一致 1197 / 不一致 0 / 缺失 0 / 未锁定 0
+- 全新复现：
+
+```bash
+PINNED_MANIFEST=manifests/a17-pinned-2026-11-21-r2.xml ./build-a17.sh init
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh sync
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user ./build-a17.sh apply   # 幂等
+OUT_DIR=/cannon/out-user CANNON_VARIANT=user JOBS=$(nproc) ./build-a17.sh build
+```
